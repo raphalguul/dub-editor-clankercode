@@ -61,6 +61,11 @@ let App = (props) => {
         setGame(newGame);
     };
 
+    const saveConfig = async (partial) => {
+        await window.api.send('updateConfig', partial);
+        setConfig(prev => ({ ...prev, ...partial }));
+    };
+
     useEffect(() => {
         getConfig();
     }, []);
@@ -68,6 +73,9 @@ let App = (props) => {
     const getConfig = async () => {
         const config = await window.api.send('getConfig');
         setConfig(config);
+        if (config.rememberGame && config.lastGame) {
+            setGame(config.lastGame);
+        }
     };
 
     if (!config) {
@@ -134,6 +142,9 @@ let App = (props) => {
                                     value={game}
                                     onChange={({ target: { value } }) => {
                                         setGame(value);
+                                        if (config.rememberGame) {
+                                            saveConfig({ lastGame: value });
+                                        }
                                     }}
                                 >
                                     <option value="rifftrax">Rifftrax</option>
@@ -141,6 +152,16 @@ let App = (props) => {
                                         What the Dub
                                     </option>
                                 </select>
+                                <label style={{ fontSize: '0.8em' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={config.rememberGame}
+                                        onChange={({ target: { checked } }) => {
+                                            saveConfig({ rememberGame: checked });
+                                        }}
+                                    />
+                                    Remember
+                                </label>
                             </div>
                         </div>
                     </header>

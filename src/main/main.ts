@@ -487,6 +487,7 @@ const createMetaDataFiles = () => {
         fs.writeFileSync(CONFIG_FILE, Buffer.from(JSON.stringify(config, null, 5)));
     } else {
         config = JSON.parse(fs.readFileSync(CONFIG_FILE, {}).toString());
+        config = { ...defaultConfig, ...config };
     }
 
     // If batch storage doesn't exist, then create it
@@ -541,6 +542,8 @@ if (!fs.existsSync(CONFIG_FILE)) {
     fs.writeFileSync(CONFIG_FILE, Buffer.from(JSON.stringify(config, null, 5)));
 } else {
     config = JSON.parse(fs.readFileSync(CONFIG_FILE, {}).toString());
+    // Ensure all default fields exist (in case config is from an older version)
+    config = { ...defaultConfig, ...config };
     if (config.mediaDirectory) {
         updateLogLocation();
     }
@@ -719,7 +722,7 @@ ipcMain.handle('clipExists', (event, { title, clipNumber, game }) => {
 
 ipcMain.handle('updateConfig', (event, newConfig) => {
     log.info('CONFIG: ' + JSON.stringify(newConfig));
-    config = newConfig;
+    config = { ...config, ...newConfig };
     fs.writeFileSync(CONFIG_FILE, Buffer.from(JSON.stringify(config, null, 5)));
     createMediaFolders('rifftrax');
     createMediaFolders('whatthedub');

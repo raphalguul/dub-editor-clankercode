@@ -27,6 +27,8 @@ export default (props) => {
     useEffect(() => {
         videoElement.current.currentTime = props.videoPosition;
         isTalking = false;
+        setMuted(false);
+        currentIndex = -1;
     }, [props.videoPosition]);
 
     useEffect(() => {

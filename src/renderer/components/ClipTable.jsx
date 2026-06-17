@@ -1,5 +1,5 @@
 import { useAtom } from 'jotai';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { gameAtom } from 'renderer/atoms/game.atom';
@@ -17,10 +17,18 @@ export default ({
     includeRename,
     onDelete,
     onRename,
+    defaultFilter,
+    onFilterChange,
+    rememberCollection,
+    onRememberChange,
 }) => {
     const [selectedCollection, setSelectedCollection] = useState(
-        collectionId || ''
+        defaultFilter || collectionId || ''
     );
+
+    useEffect(() => {
+        setSelectedCollection(defaultFilter || '');
+    }, [defaultFilter]);
     const [searchValue, setSearchValue] = useState(null);
     const [renaming, setRenaming] = useState(null);
     const [newTitle, setNewTitle] = useState(null);
@@ -117,8 +125,12 @@ export default ({
                     <>
                         <label>Clip Pack:</label>
                         <select
+                            value={selectedCollection}
                             onChange={({ target: { value } }) => {
                                 setSelectedCollection(value);
+                                if (onFilterChange) {
+                                    onFilterChange(value);
+                                }
                             }}
                         >
                             <option value="">All</option>
@@ -134,6 +146,18 @@ export default ({
                                 );
                             })}
                         </select>
+                        {onRememberChange ? (
+                            <label style={{ fontSize: '0.8em' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={!!rememberCollection}
+                                    onChange={({ target: { checked } }) => {
+                                        onRememberChange(checked);
+                                    }}
+                                />
+                                Remember
+                            </label>
+                        ) : null}
                     </>
                 ) : null}
             </div>

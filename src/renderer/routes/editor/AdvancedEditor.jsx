@@ -16,6 +16,7 @@ import { interstitialAtom } from 'renderer/atoms/interstitial.atom';
 import { handleInterstitial } from 'renderer/components/interstitial/Interstitial';
 import VideoAPI from 'renderer/api/VideoAPI';
 import { gameAtom } from 'renderer/atoms/game.atom';
+import ConfigAPI from 'renderer/api/ConfigAPI';
 
 let AdvancedEditor = () => {
     const [searchParams] = useSearchParams();
@@ -285,9 +286,9 @@ let AdvancedEditor = () => {
         let subtitles = convertSrtToSubtitles(videoDetails.srtBase64);
         subtitles = subtitles.map((subtitle, index) => {
             let voice;
-            if (subtitle.text === '[male_voice]') {
+            if (subtitle.text === '[male_dub]') {
                 voice = 'male';
-            } else if (subtitle.text === '[female_voice]') {
+            } else if (subtitle.text === '[female_dub]') {
                 voice = 'female';
             }
             return {
@@ -554,7 +555,7 @@ let AdvancedEditor = () => {
                             onVideoPositionChange={(position) => {
                                 setCurrentSliderPosition(position * 1000);
                             }}
-                            onVideoLoaded={(video) => {
+                            onVideoLoaded={async (video) => {
                                 if (!isBatch) {
                                     setEndTime(video.duration * 1000);
                                 }
@@ -562,7 +563,10 @@ let AdvancedEditor = () => {
                                     setVideoLength(video.duration);
                                 }
                                 setActualVideoLength(video.duration);
-                                fixSubs(video.duration * 1000);
+                                const config = await ConfigAPI.getConfig();
+                                if (config.fixSubsOnLoad !== false) {
+                                    fixSubs(video.duration * 1000);
+                                }
                             }}
                         />
                         <SubtitleList

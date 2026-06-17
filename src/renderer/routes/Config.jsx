@@ -24,6 +24,17 @@ const EDITOR_HELP_TEXT = (
     </>
 );
 
+const FIXSUBS_HELP_TEXT = (
+    <>
+        <h4>Fix Subtitles on Load</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            When enabled, subtitle timestamps are automatically clamped to the
+            video length when a clip is loaded. Disable this if you need to
+            preserve original SRT timestamps that extend past the video end.
+        </p>
+    </>
+);
+
 const Config = (props) => {
     const [config, setConfig] = useState({});
     const [error, setError] = useState(null);
@@ -79,6 +90,22 @@ const Config = (props) => {
                             <option value="simple">Simple</option>
                             <option value="advanced">Advanced</option>
                         </select>
+                    </td>
+                </tr>
+                <tr>
+                    <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
+                        Fix Subtitles on Load{' '}
+                        <HelpButton helpText={FIXSUBS_HELP_TEXT} />
+                    </td>
+                    <td>
+                        <input
+                            type="checkbox"
+                            checked={config.fixSubsOnLoad !== false}
+                            onChange={({ target: { checked } }) => {
+                                updateConfig('fixSubsOnLoad', checked);
+                                save({ ...config, fixSubsOnLoad: checked });
+                            }}
+                        />
                     </td>
                 </tr>
             </tbody>
