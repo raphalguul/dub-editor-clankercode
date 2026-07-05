@@ -1,4 +1,4 @@
-/* eslint global-require: off, no-console: off, promise/always-return: off */
+/* eslint no-console: off */
 
 /**
  * This module executes inside of electron's main process. You can start
@@ -26,10 +26,10 @@ const ffmpeg = require('fluent-ffmpeg');
 const StreamZip = require('node-stream-zip');
 
 // Fuck ASAR, it's a piece of shit with shitty documentation and it doesn't work the same way in every OS.
-let baseDirectory =             __dirname.substring(0, __dirname.indexOf('app.asar'));
+const baseDirectory =             __dirname.substring(0, __dirname.indexOf('app.asar'));
 let ffmpegPath =                path.join(baseDirectory, 'node_modules/ffmpeg-static/ffmpeg');
 let ffprobePath =               path.join(baseDirectory, 'node_modules/ffprobe-static/bin', process.platform, process.arch);
-let defaultPreviewFilePath =    path.join(baseDirectory, 'images/preview.jpg');
+const defaultPreviewFilePath =    path.join(baseDirectory, 'images/preview.jpg');
 
 if (process.platform === "win32") {
     ffmpegPath += ".exe";
@@ -57,10 +57,10 @@ const HOME: string =
     process.platform === 'darwin'
         ? process.env.HOME || '/'
         : `${process.env.HOMEDRIVE}${process.env.HOMEPATH}/AppData/Local/DubEditor`;
-const CONFIG_FILE: string =             `${HOME}/.dub-editor-config.v2.json`;
-const COLLECTIONS_FILE: string =        '.dub-editor-collections.v2.json';
-const BATCH_CACHE_FILE: string =        '.dub-editor-batch-cache.v2.json';
-const LOG_FILE: string =                'dub-editor.log';
+const CONFIG_FILE =             `${HOME}/.dub-editor-config.v2.json`;
+const COLLECTIONS_FILE =        '.dub-editor-collections.v2.json';
+const BATCH_CACHE_FILE =        '.dub-editor-batch-cache.v2.json';
+const LOG_FILE =                'dub-editor.log';
 
 const VIDEO_SUB_DIRECTORY =             'VideoClips';
 const SUBTITLE_SUB_DIRECTORY =          'Subtitles';
@@ -77,24 +77,24 @@ export default class AppUpdater {
 }
 
 let mainWindow: BrowserWindow | null = null;
-let defaultBatchCache : any = {
+const defaultBatchCache : any = {
     clips: [],
     video: null
 }
 let batchCache : any = defaultBatchCache;
 
-let defaultCollections: any = {
+const defaultCollections: any = {
     whatthedub: {},
     rifftrax: {},
 };
 let collections: { [key: string]: any } = defaultCollections;
 
 const convertMillisecondsToTimestamp = (milliseconds: number) => {
-    let seconds = milliseconds / 1000;
-    let h = Math.floor(seconds / 3600);
-    let m = Math.floor((seconds % 3600) / 60);
-    let s = Math.floor(seconds % 60);
-    let ms = Math.floor((seconds - Math.trunc(seconds)) * 1000);
+    const seconds = milliseconds / 1000;
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds - Math.trunc(seconds)) * 1000);
 
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
 }
@@ -104,7 +104,7 @@ const createMediaFolders = (game: string) => {
         return;
     }
 
-    let {clips, subtitles, thumbnails, previewImage, logFile} = getDirectoriesForGame(game);
+    const {clips, subtitles, thumbnails, previewImage, logFile} = getDirectoriesForGame(game);
     fs.mkdirSync(clips, {recursive: true});
     fs.mkdirSync(subtitles, {recursive: true});
     fs.mkdirSync(thumbnails, {recursive: true});
@@ -117,7 +117,7 @@ const processVideo = (inputFilePath: string, outputFilePath: string, startTime: 
         log.info("PROCESSING " + inputFilePath);
         log.info("STORING TO " + outputFilePath);
         // Process video
-        let ts = convertMillisecondsToTimestamp(startTime);
+        const ts = convertMillisecondsToTimestamp(startTime);
         ffmpeg(inputFilePath)
             .videoCodec("libx264")
             .audioCodec("aac")
@@ -243,7 +243,7 @@ const normalizeVideo = async (videoPath: string, cfg: any): Promise<boolean> => 
                             resolve(false);
                         }
                     })
-                    .on('error', (err: any, stdout: string, stderr: string) => {
+                    .on('error', (err: any, _stdout: string, stderr: string) => {
                         const errMsg = stderr || String(err);
                         if (attempt === 1 && cfg.audioDrcEnabled && filters.length > 0) {
                             log.info('Normalize DRC chain failed, retrying gain-only');
@@ -296,7 +296,7 @@ const getConfigDirectories = () : DirectoryList => {
 }
 
 const getClipPaths = (videoId: string, game: string): ClipPaths => {
-    let {clips, subtitles, thumbnails} = getDirectoriesForGame(game);
+    const {clips, subtitles, thumbnails} = getDirectoriesForGame(game);
 
     return {
         clip: `${clips}/${videoId}.mp4`,
@@ -369,8 +369,8 @@ const importZip = async (filePath: string, game: string) => {
     const videoCorrectionStack = [];
     let videoSource = '';
     while (videoDirectoryStack.length > 0) {
-        let videoSearchDirectory = videoDirectoryStack.join('/');
-        let foundEntry: any = Object.values(entries).find((entry: any) =>
+        const videoSearchDirectory = videoDirectoryStack.join('/');
+        const foundEntry: any = Object.values(entries).find((entry: any) =>
             entry.name
                 .toLowerCase()
                 .startsWith(videoSearchDirectory.toLowerCase())
@@ -389,8 +389,8 @@ const importZip = async (filePath: string, game: string) => {
     const subtitleCorrectionStack = [];
     let subtitleSource = '';
     while (subtitleDirectoryStack.length > 0) {
-        let subtitleSearchDirectory = subtitleDirectoryStack.join('/');
-        let foundEntry: any = Object.values(entries).find((entry: any) =>
+        const subtitleSearchDirectory = subtitleDirectoryStack.join('/');
+        const foundEntry: any = Object.values(entries).find((entry: any) =>
             entry.name
                 .toLowerCase()
                 .startsWith(subtitleSearchDirectory.toLowerCase())
@@ -523,11 +523,11 @@ const exportToZip = async (
     const zip: JSZip = new JSZip();
     zip.file(zipFilePath);
 
-    let root = zip.folder('');
+    const root = zip.folder('');
 
     // Store preview image
     const {previewImage: previewImageDirectory} = getDirectoriesForGame(game);
-    let previewImagePath: string = `${previewImageDirectory}/${collectionId}.jpg`;
+    let previewImagePath = `${previewImageDirectory}/${collectionId}.jpg`;
 
     if (!fs.existsSync(previewImagePath)) {
         previewImagePath = defaultPreviewFilePath;
@@ -542,7 +542,7 @@ const exportToZip = async (
         base64: true,
     });
 
-    for (let videoId of collections[game][collectionId]) {
+    for (const videoId of collections[game][collectionId]) {
         const {clip: videoFilePath, subtitle: subFilePath, thumbnail: thumbFilePath} = getClipPaths(videoId, game);
         
         if (!fs.existsSync(videoFilePath) || !fs.existsSync(subFilePath)) {
@@ -575,7 +575,7 @@ const exportToZip = async (
         root.folder('thumbnails').file(`${videoId}.jpg`, thumbNailBase64, {
             base64: true,
         });
-    };
+    }
 
     zip.generateNodeStream({ streamFiles: true }).pipe(
         fs.createWriteStream(zipFilePath)
@@ -662,8 +662,8 @@ const createMetaDataFiles = () => {
 }
 
 const updateLogLocation = () => {
-    let {logFile} = getConfigDirectories();
-    let logFilePath = path.join(logFile, LOG_FILE);
+    const {logFile} = getConfigDirectories();
+    const logFilePath = path.join(logFile, LOG_FILE);
     log.info("LOG LOCATION: " + logFilePath);
     log.info("HOME DIRECTORY: " + __dirname);
     log.info("FFMPEG PATH: " + ffmpegPath);
@@ -778,7 +778,7 @@ const createWindow = async () => {
     });
 
     protocol.interceptFileProtocol('localfile', (request, callback) => {
-        let filePath = decodeURIComponent(request.url.substring('localfile://'.length));
+        const filePath = decodeURIComponent(request.url.substring('localfile://'.length));
         
         log.info("FILE PATH: " + filePath);
 
@@ -786,18 +786,18 @@ const createWindow = async () => {
     });
 
     protocol.interceptFileProtocol('game', async (request, callback) => {
-        let url = request.url.substring('game://'.length);
-        let pattern = /^(rifftrax|whatthedub)\/(.+)\.(mp4|srt|jpg)$/;
+        const url = request.url.substring('game://'.length);
+        const pattern = /^(rifftrax|whatthedub)\/(.+)\.(mp4|srt|jpg)$/;
 
-        let match : any = url.match(pattern);
+        const match : any = url.match(pattern);
 
         if (!match) {
             return null;
         }
 
-        let game = match[1];
-        let id = match[2];
-        let ext = match[3];
+        const game = match[1];
+        const id = match[2];
+        const ext = match[3];
 
         const {clip, subtitle, thumbnail} = getClipPaths(id, game);
 
@@ -817,6 +817,7 @@ const createWindow = async () => {
         } catch (error) {
             log.warn("Cannot fetch file " + id + "." + ext);
         }
+        return;
     });
 };
 
@@ -888,7 +889,7 @@ ipcMain.handle('storeBatch', async (event, { clips, video, title }) => {
         clips,
     };
 
-    let {batchCacheMeta} = getConfigDirectories();
+    const {batchCacheMeta} = getConfigDirectories();
 
     // Write cache file
     fs.writeFileSync(
@@ -917,12 +918,12 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
 
     log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
-    let {batchCacheMeta} = getConfigDirectories();
+    const {batchCacheMeta} = getConfigDirectories();
 
-    let clip : any = batchCache.clips[0];
+    const clip : any = batchCache.clips[0];
 
     if (clip) {
-        let id = createClipName(title, clipNumber);
+        const id = createClipName(title, clipNumber);
         const {clip: videoFilePath, subtitle: subFilePath} = getClipPaths(id, game);
 
         // Write video clip
@@ -1066,14 +1067,14 @@ ipcMain.handle(
 
         log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
-        let id = createClipName(title, clipNumber);
+        const id = createClipName(title, clipNumber);
         const {clip: videoFilePath, subtitle: subFilePath, thumbnail: thumbNailPath} = getClipPaths(id, game);
 
         // Only store file if it's not already here.
         if (videoSource.startsWith("localfile://")) {
             log.info('SAVING VIDEO TO ' + videoFilePath + '\n' + subFilePath);
 
-            let sourcePath = videoSource.replace("localfile://", "");
+            const sourcePath = videoSource.replace("localfile://", "");
 
             const compatible = await isCompatible(sourcePath);
             if (!compatible) {
@@ -1250,7 +1251,7 @@ ipcMain.handle(
         }
 
         // Transfer data from one key to the other.
-        let collectionData = collections[game][oldCollectionId];
+        const collectionData = collections[game][oldCollectionId];
         collections[game][newCollectionId] = collectionData;
         delete collections[game][oldCollectionId];
 
@@ -1266,7 +1267,7 @@ ipcMain.handle('exportCollection', async (event, { collectionId, game }) => {
         return null;
     }
 
-    exportToZip(response.filePaths[0], collectionId, game);
+    return exportToZip(response.filePaths[0], collectionId, game);
 });
 
 ipcMain.handle('getCollections', (event, game) => {

@@ -5,7 +5,7 @@ export type Channels = 'ipc-example';
 contextBridge.exposeInMainWorld('api', {
     send: async (channel: string, args: any) => {
         // whitelist channels
-        let validChannels = [
+        const validChannels = [
             'clipExists',
             'fileExists',
             'updateConfig',

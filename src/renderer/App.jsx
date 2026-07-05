@@ -41,14 +41,15 @@ const imageMap = {
 };
 
 // Fix Windows scaling
-document
-    .querySelector('meta[name=viewport]')
-    .setAttribute(
+const viewportMeta = document.querySelector('meta[name=viewport]');
+if (viewportMeta) {
+    viewportMeta.setAttribute(
         'content',
         'width=device-width, initial-scale=' +
             1 / window.devicePixelRatio +
             ', maximum-scale=1.0, user-scalable=0'
     );
+}
 
 let App = (props) => {
     const navigate = useNavigate();
