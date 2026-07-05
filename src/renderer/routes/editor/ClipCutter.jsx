@@ -43,6 +43,7 @@ let ClipCutter = () => {
     const [currentSliderPosition, setCurrentSliderPosition] = useState(0);
 
     const [videoLength, setVideoLength] = useState(0);
+    const [clipName, setClipName] = useState('');
 
     let videoLengthMs = videoLength * 1000;
     let defaultClipSize = videoLengthMs * 0.1; // The recommended maximum length
@@ -60,7 +61,7 @@ let ClipCutter = () => {
 
     const isActiveElementInput = () => {
         let activeElement = document.activeElement;
-        let inputs = ['input', 'select', 'button', 'textarea'];
+        let inputs = ['input', 'select', 'textarea'];
 
         return (
             activeElement &&
@@ -221,6 +222,10 @@ let ClipCutter = () => {
             return;
         }
         setVideoSource(`localfile://${filePath}`);
+
+        let fileName = filePath.replace(/^.*[\\\/]/, '').replace(/\.[^.]*$/, '');
+        let sanitized = fileName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+        setClipName(sanitized);
     };
 
     let convertSecondsToTimestamp = (seconds) => {
@@ -336,11 +341,13 @@ let ClipCutter = () => {
                             }}
                         />
                         <ClipList
+                            key={videoSource}
                             game={params.type}
                             clips={clips}
                             currentClip={currentClip}
                             currentSliderPosition={currentSliderPosition}
                             videoLength={videoLength}
+                            initialTitle={clipName}
                             onClipsChange={clipChangeHandler}
                             onSelectClip={setCurrentClip}
                             onProcess={async (title, clips) => {
@@ -375,6 +382,7 @@ let ClipCutter = () => {
                         onSubSelect={setCurrentClip}
                         onSubsChange={clipChangeHandler}
                         onSliderPositionChange={scrub}
+                        onRowChange={() => {}}
                     />
                 </div>
             ) : (

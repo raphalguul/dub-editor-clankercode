@@ -32,15 +32,25 @@ contextBridge.exposeInMainWorld('api', {
             'removeFromCollection',
             'exportCollection',
             'setActive',
+            'showConfirmDialog',
             'openDialog',
             'openVideoFile',
             'importZip',
-            'getSubtitle'
+            'getSubtitle',
+            'normalizeAudio',
+            'normalizeCollection',
+            'transcribeAudio'
         ];
         if (validChannels.includes(channel)) {
             return await ipcRenderer.invoke(channel, args);
         } else {
             throw `Invalid channel: ${channel}`;
         }
+    },
+    onProgress: (callback: (msg: string, pct: number) => void) => {
+        ipcRenderer.on('whisper:progress', (event, msg, pct) => callback(msg, pct));
+    },
+    removeProgressListener: () => {
+        ipcRenderer.removeAllListeners('whisper:progress');
     },
 });

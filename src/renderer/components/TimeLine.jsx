@@ -60,6 +60,7 @@ export default ({
             text: '',
             type: 'subtitle',
             voice: 'male',
+            speaker: '',
         });
     };
 

@@ -54,17 +54,17 @@ export default class MenuBuilder {
 
     buildDarwinTemplate(): MenuItemConstructorOptions[] {
         const subMenuAbout: DarwinMenuItemConstructorOptions = {
-            label: 'Electron',
+            label: 'Dub Editor',
             submenu: [
                 {
-                    label: 'About ElectronReact',
+                    label: 'About Dub Editor ClankerCode Edition',
                     selector: 'orderFrontStandardAboutPanel:',
                 },
                 { type: 'separator' },
                 { label: 'Services', submenu: [] },
                 { type: 'separator' },
                 {
-                    label: 'Hide ElectronReact',
+                    label: 'Hide Dub Editor',
                     accelerator: 'Command+H',
                     selector: 'hide:',
                 },

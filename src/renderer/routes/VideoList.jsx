@@ -91,17 +91,13 @@ let VideoList = () => {
                 <Link to={`/create`}>
                     <button>New Clip</button>
                 </Link>
-                {config.editor === 'advanced' ? (
-                    <>
-                        <Link to={`/batch`}>
-                            <button>New Batch</button>
-                        </Link>
-                        {batchCount > 0 ? (
-                            <Link to={`/create?batch=true`}>
-                                <button>Continue Batch ({batchCount})</button>
-                            </Link>
-                        ) : null}
-                    </>
+                <Link to={`/batch`}>
+                    <button>New Batch</button>
+                </Link>
+                {batchCount > 0 ? (
+                    <Link to={`/create?batch=true`}>
+                        <button>Continue Batch ({batchCount})</button>
+                    </Link>
                 ) : null}
             </div>
             <ClipTable

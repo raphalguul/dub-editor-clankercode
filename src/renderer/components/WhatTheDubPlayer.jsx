@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createWebVttDataUri } from '../util/VideoTools';
 
 let isTalking = false;
 let hasEnded = false;
-let currentIndex = -1;
-let interval;
 
 export default (props) => {
     const [muted, setMuted] = useState(false);
     const [loading, setLoading] = useState(true);
+    const currentIndexRef = useRef(-1);
+    const intervalRef = useRef(null);
+    const shouldMuteRef = useRef(false);
+    const subsRef = useRef(props.subs);
+    subsRef.current = props.subs;
 
     const videoElement = React.createRef();
 
@@ -28,7 +31,7 @@ export default (props) => {
         videoElement.current.currentTime = props.videoPosition;
         isTalking = false;
         setMuted(false);
-        currentIndex = -1;
+        currentIndexRef.current = -1;
     }, [props.videoPosition]);
 
     useEffect(() => {
@@ -41,10 +44,6 @@ export default (props) => {
 
     let setIsTalking = (b) => {
         isTalking = b;
-    };
-
-    let setCurrentIndex = (i) => {
-        currentIndex = i;
     };
 
     let speak = (subtitle, text) => {
@@ -78,52 +77,55 @@ export default (props) => {
             return;
         }
 
+        const subs = subsRef.current;
+
         props.onVideoPositionChange(video.currentTime);
-        let index = props.subs.findIndex((subtitle) => {
+        let index = subs.findIndex((subtitle) => {
             return (
-                video.currentTime > subtitle.startTime / 1000 &&
-                video.currentTime < subtitle.endTime / 1000
+                video.currentTime > (subtitle.startTime + props.offset) / 1000 &&
+                video.currentTime < (subtitle.endTime + props.offset) / 1000
             );
         });
 
-        if (index !== currentIndex) {
+        const shouldMute = index >= 0 && subs[index].type === 'dynamic';
+        if (shouldMute !== shouldMuteRef.current) {
+            shouldMuteRef.current = shouldMute;
+            setMuted(shouldMute);
+        }
+
+        if (index !== currentIndexRef.current) {
             if (isTalking) {
                 video.pause();
                 return;
             }
 
-            if (currentIndex >= 0) {
-                let currentSubtitle = props.subs[currentIndex];
-                if (currentSubtitle?.type === 'dynamic') {
-                    setMuted(false);
-                }
-            }
-
             if (index >= 0) {
-                let subtitle = props.subs[index];
-                if (subtitle.type === 'dynamic') {
-                    setMuted(true);
-                    if (props.substitution) {
-                        speak(subtitle, props.substitution);
-                    }
+                let subtitle = subs[index];
+                if (subtitle.type === 'dynamic' && props.substitution) {
+                    speak(subtitle, props.substitution);
                 }
                 props.onIndexChange(index);
             }
 
-            setCurrentIndex(index);
+            currentIndexRef.current = index;
         }
     };
 
-    let startListener = () => {
-        interval = setInterval(() => {
-            let video = document.getElementById('videoElement');
-            updateSubtitle(video);
-        }, 1000 / 60);
-    };
+    useEffect(() => {
+        if (props.isPlaying) {
+            intervalRef.current = setInterval(() => {
+                let video = document.getElementById('videoElement');
+                updateSubtitle(video);
+            }, 1000 / 60);
+        }
 
-    let pauseListener = () => {
-        clearInterval(interval);
-    };
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+        };
+    }, [props.isPlaying, props.subs]);
 
     if (props.width) {
         return (
@@ -145,22 +147,15 @@ export default (props) => {
                 >
                     {loading ? 'Loading Video...' : null}
                 </div>
-                {props.videoSource ? (
+                    {props.videoSource ? (
                     <video
                         id="videoElement"
                         ref={videoElement}
                         src={props.videoSource}
                         style={{ width: props.width }}
                         muted={muted}
-                        onPlay={() => {
-                            startListener();
-                        }}
-                        onPause={() => {
-                            pauseListener();
-                        }}
                         onEnded={() => {
                             if (!isTalking) {
-                                pauseListener();
                                 props.onEnd();
                             } else {
                                 hasEnded = true;
@@ -216,15 +211,8 @@ export default (props) => {
                     ref={videoElement}
                     src={props.videoSource}
                     muted={muted}
-                    onPlay={() => {
-                        startListener();
-                    }}
-                    onPause={() => {
-                        pauseListener();
-                    }}
                     onEnded={() => {
                         if (!isTalking) {
-                            pauseListener();
                             props.onEnd();
                         } else {
                             hasEnded = true;

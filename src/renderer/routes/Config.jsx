@@ -12,14 +12,12 @@ const WORKSPACE_HELP_TEXT = (
     </>
 );
 
-const EDITOR_HELP_TEXT = (
+const SPEAKER_CONFIRM_HELP_TEXT = (
     <>
-        <h4>Editor</h4>
+        <h4>Warn if no speakers on Finalize</h4>
         <p style={{ fontSize: '0.8rem' }}>
-            This selects the editor you wish to utilize. The advanced editor
-            looks more like a full on video editting tool and allows you to
-            perform batch processing on systems that support it. The simple
-            editor is just the bare essentials and some prefer it.
+            When enabled, you will be prompted to confirm before finalizing a
+            clip that has no speakers defined. Disable this to skip the warning.
         </p>
     </>
 );
@@ -35,9 +33,58 @@ const FIXSUBS_HELP_TEXT = (
     </>
 );
 
+const NORMALIZE_FINALIZE_HELP = (
+    <>
+        <h4>Normalize Audio on Finalize</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            Automatically normalizes audio (loudness + dynamic range
+            compression) when you finalize a clip. Already-normalized clips are
+            skipped. Disable if you prefer raw audio levels.
+        </p>
+    </>
+);
+
+const DRC_HELP = (
+    <>
+        <h4>Dynamic Range Compression</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            Evens out volume differences between quiet and loud parts.
+            Recommended for WTD:
+            Threshold -12
+            Ratio 2
+            Attack 0,2
+            Release 1
+        </p>
+    </>
+);
+
+const LOUDNESS_HELP = (
+    <>
+        <h4>Loudness Target (EBU R128)</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            Target integrated loudness in LUFS.
+            Recommended for WTD: -20
+        </p>
+    </>
+);
+
+const WHISPER_MODEL_HELP = (
+    <>
+        <h4>Whisper Model Size</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            Larger models produce better transcriptions but are slower and use
+            more RAM. tiny (32MB) is fastest, large (1GB) is most accurate.
+            Models download on first use. GPU acceleration only works with Nvidia cards.
+            Fallback is recommended. Suppress silence is intended to prevent subtitle 
+            generation on quiet portions of the video. Experimental.
+        </p>
+    </>
+);
+
 const Config = (props) => {
     const [config, setConfig] = useState({});
     const [error, setError] = useState(null);
+    const [showDrcSettings, setShowDrcSettings] = useState(false);
 
     useEffect(() => {
         getConfig();
@@ -70,44 +117,190 @@ const Config = (props) => {
         }
     };
 
+    const checkboxRow = (label, field, helpText) => (
+        <tr>
+            <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
+                {label} <HelpButton helpText={helpText} />
+            </td>
+            <td>
+                <input
+                    type="checkbox"
+                    checked={config[field] !== false}
+                    onChange={({ target: { checked } }) => {
+                        let nc = { ...config, [field]: checked };
+                        setConfig(nc);
+                        save(nc);
+                    }}
+                />
+            </td>
+        </tr>
+    );
+
+    const sliderRow = (label, field, min, max, step, helpText) => (
+        <tr>
+            <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
+                {label} <HelpButton helpText={helpText} />
+            </td>
+            <td style={{ textAlign: 'left', paddingLeft: '10px' }}>
+                <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={step}
+                    value={config[field] ?? 0}
+                    onChange={({ target: { value } }) => {
+                        let nc = { ...config, [field]: parseFloat(value) };
+                        setConfig(nc);
+                    }}
+                    onMouseUp={() => save(config)}
+                />
+                <span style={{ marginLeft: '8px', minWidth: '50px', display: 'inline-block' }}>
+                    {config[field]}
+                </span>
+            </td>
+        </tr>
+    );
+
+    const audioSection = (
+        <div style={{ marginTop: '30px' }}>
+            <h4>Audio Normalization</h4>
+            <table style={{ margin: 'auto' }}>
+                <tbody>
+                    {checkboxRow(
+                        'Normalize Audio on Finalize',
+                        'audioNormalizeOnFinalize',
+                        NORMALIZE_FINALIZE_HELP
+                    )}
+                    {sliderRow(
+                        'Loudness Target (LUFS)',
+                        'audioLoudnessTarget',
+                        -30,
+                        -5,
+                        1,
+                        LOUDNESS_HELP
+                    )}
+                    {checkboxRow(
+                        'Enable DRC',
+                        'audioDrcEnabled',
+                        DRC_HELP
+                    )}
+                    {config.audioDrcEnabled !== false && (
+                        <tr>
+                            <td colSpan={2} style={{ padding: '5px 0' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowDrcSettings(!showDrcSettings)}
+                                    style={{
+                                        fontSize: '0.8rem',
+                                        padding: '2px 8px',
+                                    }}
+                                >
+                                    {showDrcSettings ? 'Hide' : 'Show'} DRC Settings
+                                </button>
+                            </td>
+                        </tr>
+                    )}
+                    {config.audioDrcEnabled !== false && showDrcSettings && (
+                        <>
+                            {sliderRow(
+                                'DRC Threshold (dB)',
+                                'audioDrcThreshold',
+                                -30,
+                                0,
+                                1,
+                                DRC_HELP
+                            )}
+                            {sliderRow(
+                                'DRC Ratio',
+                                'audioDrcRatio',
+                                1,
+                                10,
+                                0.5,
+                                DRC_HELP
+                            )}
+                            {sliderRow(
+                                'DRC Attack (s)',
+                                'audioDrcAttack',
+                                0.01,
+                                1,
+                                0.01,
+                                DRC_HELP
+                            )}
+                            {sliderRow(
+                                'DRC Release (s)',
+                                'audioDrcRelease',
+                                0.05,
+                                5,
+                                0.05,
+                                DRC_HELP
+                            )}
+                        </>
+                    )}
+                </tbody>
+            </table>
+        </div>
+    );
+
+    const modelSizes = ['tiny', 'base', 'small', 'medium', 'large'];
+
+    const whisperSection = (
+        <div style={{ marginTop: '30px' }}>
+            <h4>Whisper Transcription</h4>
+            <p style={{ fontSize: '0.75rem', color: '#888' }}>
+                Models and binaries download automatically on first use.
+            </p>
+            <table style={{ margin: 'auto' }}>
+                <tbody>
+                    <tr>
+                        <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
+                            Model Size <HelpButton helpText={WHISPER_MODEL_HELP} />
+                        </td>
+                        <td style={{ textAlign: 'left', paddingLeft: '10px' }}>
+                            <select
+                                value={config.whisperModelSize || 'base'}
+                                onChange={({ target: { value } }) => {
+                                    let nc = { ...config, whisperModelSize: value };
+                                    setConfig(nc);
+                                    save(nc);
+                                }}
+                            >
+                                {modelSizes.map((s) => (
+                                    <option key={s} value={s}>
+                                        {s}
+                                    </option>
+                                ))}
+                            </select>
+                        </td>
+                    </tr>
+                    {checkboxRow(
+                        'Use CUDA (GPU Acceleration)',
+                        'whisperUseCuda',
+                        WHISPER_MODEL_HELP
+                    )}
+                    {checkboxRow(
+                        'Fallback to CPU if CUDA fails',
+                        'whisperCudaFallbackCpu',
+                        WHISPER_MODEL_HELP
+                    )}
+                    {checkboxRow(
+                        'Suppress Silence',
+                        'whisperSuppressSilence',
+                        WHISPER_MODEL_HELP
+                    )}
+                </tbody>
+            </table>
+        </div>
+    );
+
     const otherConfig = (
         <table style={{ margin: 'auto' }}>
             <tbody>
-                <tr>
-                    <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
-                        Default Editor{' '}
-                        <HelpButton helpText={EDITOR_HELP_TEXT} />
-                    </td>
-                    <td>
-                        <select
-                            value={config.editor}
-                            onChange={({ target: { value } }) => {
-                                updateConfig('editor', value);
-                                save({ ...config, editor: value });
-                            }}
-                        >
-                            <option>None</option>
-                            <option value="simple">Simple</option>
-                            <option value="advanced">Advanced</option>
-                        </select>
-                    </td>
-                </tr>
-                <tr>
-                    <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
-                        Fix Subtitles on Load{' '}
-                        <HelpButton helpText={FIXSUBS_HELP_TEXT} />
-                    </td>
-                    <td>
-                        <input
-                            type="checkbox"
-                            checked={config.fixSubsOnLoad !== false}
-                            onChange={({ target: { checked } }) => {
-                                updateConfig('fixSubsOnLoad', checked);
-                                save({ ...config, fixSubsOnLoad: checked });
-                            }}
-                        />
-                    </td>
-                </tr>
+                {checkboxRow('Fix Subtitles on Load', 'fixSubsOnLoad', FIXSUBS_HELP_TEXT)}
+                {checkboxRow(
+                    'Warn if no speakers on Finalize',
+                    'checkSpeakersOnFinalize',
+                    SPEAKER_CONFIRM_HELP_TEXT
+                )}
             </tbody>
         </table>
     );
@@ -146,6 +339,8 @@ const Config = (props) => {
                 </tbody>
             </table>
             {otherConfig}
+            {audioSection}
+            {whisperSection}
             {props.onRefresh ? (
                 <button
                     onClick={() => {

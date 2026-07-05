@@ -120,6 +120,27 @@ export default () => {
         );
     };
 
+    const normalizeCollection = async (collectionId) => {
+        try {
+            const result = await handleInterstitial(
+                window.api.send('normalizeCollection', { collectionId, game }),
+                (isOpen) => {
+                    setInterstitialState({
+                        isOpen,
+                        message: 'Normalizing audio...',
+                    });
+                }
+            );
+            toast(
+                `Normalized ${result.processed} clips (${result.skipped} already done)`,
+                { type: 'info' }
+            );
+        } catch (err) {
+            console.error(err);
+            toast('Normalization failed', { type: 'error' });
+        }
+    };
+
     let menuOptions = (
         <>
             <button
@@ -245,6 +266,15 @@ export default () => {
                                         >
                                             Delete Collection and Files
                                         </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                normalizeCollection(key);
+                                            }}
+                                            style={{ fontWeight: 'bold' }}
+                                        >
+                                            Normalize Audio
+                                        </button>
                                     </td>
                                 </tr>
                             );
@@ -273,9 +303,20 @@ export default () => {
             return (
                 <div>
                     {menuOptions}
+                    <div style={{ marginBottom: '10px' }}>
+                        <h2 style={{ display: 'inline', marginRight: '15px' }}>
+                            Clip Pack {collectionId}
+                        </h2>
+                        <button
+                            type="button"
+                            onClick={() => normalizeCollection(collectionId)}
+                            style={{ fontWeight: 'bold' }}
+                        >
+                            Normalize All Clips
+                        </button>
+                    </div>
                     <div className="clip-pack-edit">
                         <div>
-                            <h2>Clip Pack {collectionId}</h2>
                             <ClipTable
                                 videos={videos}
                                 collections={collections}

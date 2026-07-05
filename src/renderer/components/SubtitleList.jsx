@@ -66,6 +66,18 @@ export default ({
     };
 
     let currentSubObject = subs[currentSub];
+
+    let prevSpeaker = null;
+    if (currentSub !== null && subs.length > 0) {
+        for (let i = currentSub - 1; i >= 0; i--) {
+            if (subs[i]?.speaker) {
+                prevSpeaker = subs[i].speaker;
+                break;
+            }
+        }
+    }
+    let speakerPlaceholder = prevSpeaker || 'YOU FORGOT TO DEFINE SPEAKERS';
+
     return (
         <div className="subtitle-window">
             <h3>Clip Details</h3>
@@ -196,6 +208,7 @@ export default ({
                         text: '',
                         type: 'subtitle',
                         voice: 'male',
+                        speaker: '',
                     });
                 }}
             >
@@ -327,6 +340,31 @@ export default ({
                             </td>
                         </tr>
                     ) : null}
+                    <tr>
+                        <td>
+                            <label>Speaker</label>
+                        </td>
+                        <td>
+                            <input
+                                type="text"
+                                value={currentSubObject?.speaker || ''}
+                                onChange={({
+                                    target: { value: speaker },
+                                }) => {
+                                    onSubsChange(
+                                        'edit',
+                                        {
+                                            ...currentSubObject,
+                                            speaker,
+                                        },
+                                        currentSub
+                                    );
+                                }}
+                                disabled={!currentSubObject}
+                                placeholder={speakerPlaceholder}
+                            />
+                        </td>
+                    </tr>
                     {currentSubObject?.type !== 'dynamic' ? (
                         <tr>
                             <td>

@@ -47,12 +47,17 @@ export let convertSecondsToAltTimestamp = (seconds) => {
 export let convertSubtitlesToSrt = (subtitles, game) => {
     return subtitles
         .map((subtitle, index) => {
-            let text = subtitle.text;
+            let text;
             if (subtitle.type === 'dynamic' && game === 'rifftrax') {
                 text = '[Insert Riff Here]';
             } else if (subtitle.type === 'dynamic' && game === 'whatthedub') {
                 text =
                     subtitle.voice === 'female' ? '[female_dub]' : '[male_dub]';
+            } else {
+                text = subtitle.text;
+            }
+            if (subtitle.speaker) {
+                text = `${subtitle.speaker}: ${text}`;
             }
             return `${index + 1}\n${convertSecondsToTimestamp(
                 subtitle.startTime / 1000
@@ -89,9 +94,16 @@ export let convertSrtToSubtitles = (srtBase64) => {
                     convertTimestampToSeconds(startTime) * 1000;
                 subtitle.endTime = convertTimestampToSeconds(endTime) * 1000;
                 break;
-            case 2:
-                subtitle.text = line;
+            case 2: {
+                let speakerMatch = line.match(/^([^:\(\)]+):\s+(.+)/);
+                if (speakerMatch) {
+                    subtitle.speaker = speakerMatch[1];
+                    subtitle.text = speakerMatch[2];
+                } else {
+                    subtitle.text = line;
+                }
                 break;
+            }
             case 3:
                 if (line !== '') {
                     subtitle.text += `\n${line}`;
@@ -119,19 +131,20 @@ export let convertSubtitlesToWebVtt = (subtitles, substitution, offset = 0) => {
         'WEBVTT\n\n' +
         subtitles
             .map((subtitle) => {
+                let displayText;
                 if (substitution && subtitle.type === 'dynamic') {
-                    return `${convertSecondsToAltTimestamp(
-                        (subtitle.startTime + offset) / 1000
-                    )} --> ${convertSecondsToAltTimestamp(
-                        (subtitle.endTime + offset) / 1000
-                    )}\n${substitution}`;
+                    displayText = substitution;
                 } else {
-                    return `${convertSecondsToAltTimestamp(
-                        (subtitle.startTime + offset) / 1000
-                    )} --> ${convertSecondsToAltTimestamp(
-                        (subtitle.endTime + offset) / 1000
-                    )}\n${subtitle.text}`;
+                    displayText = subtitle.text;
                 }
+                if (subtitle.speaker) {
+                    displayText = `${subtitle.speaker}: ${displayText}`;
+                }
+                return `${convertSecondsToAltTimestamp(
+                    (subtitle.startTime + offset) / 1000
+                )} --> ${convertSecondsToAltTimestamp(
+                    (subtitle.endTime + offset) / 1000
+                )}\n${displayText}`;
             })
             .join('\n\n');
 

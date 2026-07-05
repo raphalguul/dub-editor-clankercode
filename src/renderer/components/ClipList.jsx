@@ -28,8 +28,9 @@ export default ({
     onClipsChange,
     onSelectClip,
     onProcess,
+    initialTitle,
 }) => {
-    const [clipTitle, setClipTitle] = useState('');
+    const [clipTitle, setClipTitle] = useState(initialTitle || '');
     let currentClipObject = clips[currentClip];
 
     let videoLengthMs = videoLength * 1000;

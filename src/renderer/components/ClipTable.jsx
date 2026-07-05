@@ -27,7 +27,9 @@ export default ({
     );
 
     useEffect(() => {
-        setSelectedCollection(defaultFilter || '');
+        if (defaultFilter !== undefined) {
+            setSelectedCollection(defaultFilter);
+        }
     }, [defaultFilter]);
     const [searchValue, setSearchValue] = useState(null);
     const [renaming, setRenaming] = useState(null);

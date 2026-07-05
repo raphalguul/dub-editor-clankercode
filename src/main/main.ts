@@ -19,6 +19,8 @@ import { resolveHtmlPath } from './util';
 import defaultConfig from './defaultConfig';
 import JSZip from 'jszip';
 import { ClipPaths, DirectoryList } from './types';
+import * as whisper from './whisper';
+import { isCompatible, convertToCompatible } from './videoFormat';
 
 const ffmpeg = require('fluent-ffmpeg');
 const StreamZip = require('node-stream-zip');
@@ -26,16 +28,25 @@ const StreamZip = require('node-stream-zip');
 // Fuck ASAR, it's a piece of shit with shitty documentation and it doesn't work the same way in every OS.
 let baseDirectory =             __dirname.substring(0, __dirname.indexOf('app.asar'));
 let ffmpegPath =                path.join(baseDirectory, 'node_modules/ffmpeg-static/ffmpeg');
+let ffprobePath =               path.join(baseDirectory, 'node_modules/ffprobe-static/bin', process.platform, process.arch);
 let defaultPreviewFilePath =    path.join(baseDirectory, 'images/preview.jpg');
 
 if (process.platform === "win32") {
     ffmpegPath += ".exe";
+    ffprobePath = path.join(ffprobePath, 'ffprobe.exe');
+} else {
+    ffprobePath = path.join(ffprobePath, 'ffprobe');
 }
 
 ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath);
 
 if (!fs.existsSync(ffmpegPath)) {
     log.error("Unable to locate FFMPEG");
+}
+
+if (!fs.existsSync(ffprobePath)) {
+    log.error("Unable to locate FFPROBE");
 }
 
 if (!fs.existsSync(defaultPreviewFilePath)) {
@@ -109,6 +120,8 @@ const processVideo = (inputFilePath: string, outputFilePath: string, startTime: 
         let ts = convertMillisecondsToTimestamp(startTime);
         ffmpeg(inputFilePath)
             .videoCodec("libx264")
+            .audioCodec("aac")
+            .audioBitrate("192k")
             .setStartTime(ts)
             .setDuration(duration / 1000)
             .output(outputFilePath)
@@ -152,6 +165,111 @@ const createThumbnail = async (videoFilePath: string, thumbnailTime: string, thu
             .run();
     });
 }
+
+const NORMALIZED_MARKER_SUFFIX = '.normalized';
+
+const normalizeVideo = async (videoPath: string, cfg: any): Promise<boolean> => {
+    const markerPath = videoPath + NORMALIZED_MARKER_SUFFIX;
+
+    if (fs.existsSync(markerPath)) {
+        try {
+            const marker = JSON.parse(fs.readFileSync(markerPath, 'utf-8'));
+            if (
+                marker.loudnessTarget === cfg.audioLoudnessTarget &&
+                marker.drcEnabled === cfg.audioDrcEnabled &&
+                marker.drcThreshold === cfg.audioDrcThreshold &&
+                marker.drcRatio === cfg.audioDrcRatio &&
+                marker.drcAttack === cfg.audioDrcAttack &&
+                marker.drcRelease === cfg.audioDrcRelease
+            ) {
+                log.info('Audio already normalized, skipping');
+                return true;
+            }
+        } catch {}
+    }
+
+    return new Promise((resolve) => {
+        try {
+            const filters: string[] = [];
+
+            if (cfg.audioDrcEnabled) {
+                const threshold = Math.pow(10, cfg.audioDrcThreshold / 20);
+                filters.push(
+                    `acompressor=threshold=${threshold}:ratio=${cfg.audioDrcRatio}:attack=${cfg.audioDrcAttack * 1000}:release=${cfg.audioDrcRelease * 1000}`
+                );
+            }
+
+            if (cfg.audioLoudnessTarget !== undefined && cfg.audioLoudnessTarget !== null) {
+                const target = Math.max(-30, Math.min(-5, cfg.audioLoudnessTarget));
+                filters.push(`loudnorm=I=${target}:LRA=7:TP=-1:linear=true`);
+            } else if (cfg.audioDrcEnabled) {
+                filters.push('dynaudnorm=peak=0.95');
+            }
+
+            const tmpOutput = videoPath + '.normalizing.mp4';
+            let attempt = 0;
+
+            const runNormalize = (filterChain: string[]) => {
+                attempt++;
+                const cmd = ffmpeg(videoPath)
+                    .videoCodec('copy')
+                    .audioCodec('aac')
+                    .audioBitrate('192k');
+
+                if (filterChain.length > 0) {
+                    cmd.audioFilters(filterChain.join(','));
+                }
+
+                cmd.output(tmpOutput)
+                    .on('end', () => {
+                        try {
+                            fs.renameSync(tmpOutput, videoPath);
+                            fs.writeFileSync(
+                                markerPath,
+                                JSON.stringify({
+                                    normalizedAt: new Date().toISOString(),
+                                    loudnessTarget: cfg.audioLoudnessTarget,
+                                    drcEnabled: cfg.audioDrcEnabled,
+                                    drcThreshold: cfg.audioDrcThreshold,
+                                    drcRatio: cfg.audioDrcRatio,
+                                    drcAttack: cfg.audioDrcAttack,
+                                    drcRelease: cfg.audioDrcRelease,
+                                })
+                            );
+                            log.info('Audio normalized: ' + videoPath);
+                            resolve(true);
+                        } catch (err) {
+                            log.error('Normalize swap failed: ' + err);
+                            resolve(false);
+                        }
+                    })
+                    .on('error', (err: any, stdout: string, stderr: string) => {
+                        const errMsg = stderr || String(err);
+                        if (attempt === 1 && cfg.audioDrcEnabled && filters.length > 0) {
+                            log.info('Normalize DRC chain failed, retrying gain-only');
+                            log.info('FFmpeg error: ' + errMsg.substring(0, 300));
+                            const gainFilters: string[] = [];
+                            if (cfg.audioLoudnessTarget !== undefined && cfg.audioLoudnessTarget !== null) {
+                                const target = Math.max(-30, Math.min(-5, cfg.audioLoudnessTarget));
+                                gainFilters.push(`loudnorm=I=${target}:LRA=7:TP=-1:linear=true`);
+                            }
+                            runNormalize(gainFilters);
+                        } else {
+                            log.error('Normalize failed: ' + errMsg);
+                            try { fs.unlinkSync(tmpOutput); } catch {}
+                            resolve(false);
+                        }
+                    })
+                    .run();
+            };
+
+            runNormalize(filters);
+        } catch (err) {
+            log.error('Normalize setup failed: ' + err);
+            resolve(false);
+        }
+    });
+};
 
 const getDirectoriesForGame = (game: string) : DirectoryList => {
     return {
@@ -300,26 +418,51 @@ const importZip = async (filePath: string, game: string) => {
     await zip.extract(sourceSubtitlesDirectory, targetSubtitlesDirectory);
     await zip.extract('thumbnails', targetThumbNailsDirectory);
 
+    const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.webm'];
+
     const videoIdList = Object.values(entries)
         .filter(
             (entry: any) =>
                 entry.name
                     .toLowerCase()
                     .startsWith(sourceVideoDirectory.toLowerCase()) &&
-                entry.name.endsWith('.mp4')
+                videoExtensions.some(ext => entry.name.toLowerCase().endsWith(ext))
         )
-        .map((entry: any) =>
-            entry.name.substring(
-                entry.name.lastIndexOf('/') + 1,
-                entry.name.lastIndexOf('.mp4')
-            )
-        );
+        .map((entry: any) => {
+            const ext = videoExtensions.find(e => entry.name.toLowerCase().endsWith(e));
+            return {
+                id: entry.name.substring(
+                    entry.name.lastIndexOf('/') + 1,
+                    entry.name.lastIndexOf(ext)
+                ),
+                ext,
+            };
+        });
+
+    // Convert non-mp4 files to mp4 after extraction
+    for (const {id, ext} of videoIdList) {
+        if (ext !== '.mp4') {
+            const srcPath = `${targetVideoDirectory}/${id}${ext}`;
+            const dstPath = `${targetVideoDirectory}/${id}.mp4`;
+            if (fs.existsSync(srcPath)) {
+                try {
+                    log.info(`Converting extracted ${ext} to mp4: ${id}`);
+                    await convertToCompatible(srcPath, dstPath);
+                    fs.unlinkSync(srcPath);
+                } catch (err) {
+                    log.error(`Failed to convert ${id}: ${err}`);
+                }
+            }
+        }
+    }
+
+    const ids = videoIdList.map(v => v.id);
 
     // Rename videos so they will be treated as custom clips
     const clipsDirectory = targetVideoDirectory;
     const subsDirectory = targetSubtitlesDirectory;
     const mismatchedIds: string[] = [];
-    videoIdList.forEach((videoId) => {
+    ids.forEach((videoId) => {
         if (videoId.startsWith('_')) {
             return;
         }
@@ -359,7 +502,7 @@ const importZip = async (filePath: string, game: string) => {
     addToCollection(
         game,
         collectionId,
-        videoIdList
+        ids
             .filter((videoId: string) => !mismatchedIds.includes(videoId))
             .map((videoId) => {
                 if (videoId.startsWith('_')) {
@@ -635,7 +778,7 @@ const createWindow = async () => {
     });
 
     protocol.interceptFileProtocol('localfile', (request, callback) => {
-        let filePath = request.url.substring('localfile://'.length);
+        let filePath = decodeURIComponent(request.url.substring('localfile://'.length));
         
         log.info("FILE PATH: " + filePath);
 
@@ -785,8 +928,15 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
         // Write video clip
         await trimAndWriteVideo(videoSource.replace("localfile://", ""), videoFilePath, clip.startTime, clip.endTime);
 
+        // Invalidate normalization marker since video was re-created
+        try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
+
         // Write matching subtitles
         fs.writeFileSync(subFilePath, subtitles);
+
+        if (config.audioNormalizeOnFinalize) {
+            normalizeVideo(videoFilePath, config);
+        }
 
         // Remove the clip from batch on completion
         batchCache.clips.shift();
@@ -909,7 +1059,7 @@ ipcMain.handle(
 
 ipcMain.handle(
     'storeVideo',
-    (event, { videoSource, subtitles, subtitleObjects, title, clipNumber, game }) => {
+    async (event, { videoSource, subtitles, subtitleObjects, title, clipNumber, game }) => {
         log.info(
             `STORING ${title}-${clipNumber} for game ${game} with subtitles \n${subtitles}`
         );
@@ -922,8 +1072,22 @@ ipcMain.handle(
         // Only store file if it's not already here.
         if (videoSource.startsWith("localfile://")) {
             log.info('SAVING VIDEO TO ' + videoFilePath + '\n' + subFilePath);
-            // Copy video file from where ever it was previously located.
-            fs.copyFileSync(videoSource.replace("localfile://", ""), videoFilePath);
+
+            let sourcePath = videoSource.replace("localfile://", "");
+
+            const compatible = await isCompatible(sourcePath);
+            if (!compatible) {
+                log.info('Source video is not compatible, converting...');
+                const tmpPath = videoFilePath + '.converting.mp4';
+                await convertToCompatible(sourcePath, tmpPath);
+                fs.copyFileSync(tmpPath, videoFilePath);
+                try { fs.unlinkSync(tmpPath); } catch {}
+            } else {
+                fs.copyFileSync(sourcePath, videoFilePath);
+            }
+
+            // Invalidate normalization marker since video was re-created
+            try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
 
             // Create a thumbnail
             const thumbnailTime = '00:00:01';
@@ -931,6 +1095,10 @@ ipcMain.handle(
         }
         log.info('SAVING SUBS TO ' + subFilePath);
         fs.writeFileSync(subFilePath, subtitles);
+
+        if (config.audioNormalizeOnFinalize) {
+            normalizeVideo(videoFilePath, config);
+        }
 
         return id;
     }
@@ -1120,7 +1288,7 @@ ipcMain.handle('openVideoFile', async () => {
     const response = await dialog.showOpenDialog({
         properties: ['openFile'],
         filters: [
-            {name: "Clips", extensions: ["mp4"]}
+            {name: "Video Files", extensions: ["mp4", "mkv", "avi", "mov", "webm"]}
         ]
     });
     if (!response.canceled) {
@@ -1148,6 +1316,17 @@ ipcMain.handle('setActive', async (event) => {
 
 });
 
+ipcMain.handle('showConfirmDialog', async (event, { message }) => {
+    const result = await dialog.showMessageBox(mainWindow!, {
+        type: 'question',
+        buttons: ['Cancel', 'OK'],
+        defaultId: 1,
+        cancelId: 0,
+        message,
+    });
+    return result.response !== 0;
+});
+
 ipcMain.handle('importZip', async (event, game) => {
     log.info('IMPORTING ZIP');
     const response = await dialog.showOpenDialog({
@@ -1159,6 +1338,70 @@ ipcMain.handle('importZip', async (event, game) => {
     }
     await importZip(response.filePaths[0], game);
     return collections[game];
+});
+
+ipcMain.handle('normalizeAudio', async (event, { videoPath, game }) => {
+    if (!fs.existsSync(videoPath)) {
+        throw new Error('Video file not found');
+    }
+    const success = await normalizeVideo(videoPath, config);
+    return { success };
+});
+
+ipcMain.handle('normalizeCollection', async (event, { collectionId, game }) => {
+    if (!collections[game] || !collections[game][collectionId]) {
+        throw new Error('Collection not found');
+    }
+
+    const videoIds = collections[game][collectionId];
+    let processed = 0;
+    let skipped = 0;
+
+    for (const videoId of videoIds) {
+        const { clip: videoFilePath } = getClipPaths(videoId, game);
+        if (!fs.existsSync(videoFilePath)) continue;
+
+        const markerPath = videoFilePath + NORMALIZED_MARKER_SUFFIX;
+        if (fs.existsSync(markerPath)) {
+            skipped++;
+            continue;
+        }
+
+        const success = await normalizeVideo(videoFilePath, config);
+        if (success) processed++;
+    }
+
+    return { processed, skipped, total: videoIds.length };
+});
+
+ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConfig, startTime, endTime }) => {
+    if (!fs.existsSync(videoPath)) {
+        throw new Error('Video file not found');
+    }
+
+    let startSec: number | undefined;
+    let durSec: number | undefined;
+    if (startTime !== undefined && endTime !== undefined) {
+        startSec = startTime / 1000;
+        durSec = (endTime - startTime) / 1000;
+    }
+
+    const results = await whisper.transcribe(
+        videoPath,
+        whisperConfig,
+        (msg: string) => {
+            log.info('[whisper] ' + msg);
+            mainWindow?.webContents.send('whisper:progress', msg, -1);
+        },
+        (pct: number) => {
+            log.info('[whisper] Progress: ' + pct + '%');
+            mainWindow?.webContents.send('whisper:progress', '', pct);
+        },
+        startSec,
+        durSec
+    );
+
+    return { results };
 });
 
 ipcMain.handle('disableVideos', async (event) => {

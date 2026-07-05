@@ -47,6 +47,7 @@ let AdvancedEditor = () => {
     const [currentSub, setCurrentSub] = useState(null);
     const [substitution, setSubstitution] = useState('');
     const [buttonsDisabled, setButtonsDisabled] = useState(false);
+    const [playerKey, setPlayerKey] = useState(0);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentPosition, setCurrentPosition] = useState(0);
@@ -74,7 +75,7 @@ let AdvancedEditor = () => {
 
     const isActiveElementInput = () => {
         let activeElement = document.activeElement;
-        let inputs = ['input', 'select', 'button', 'textarea'];
+        let inputs = ['input', 'select', 'textarea'];
 
         return (
             activeElement &&
@@ -227,6 +228,7 @@ let AdvancedEditor = () => {
                     text: '',
                     type: 'subtitle',
                     voice: 'male',
+                    speaker: '',
                 });
                 break;
             case 't':
@@ -249,7 +251,7 @@ let AdvancedEditor = () => {
     const getCurrentIndex = () => {
         let index = subs.findIndex((subtitle) => {
             return (
-                currentSliderPosition > subtitle.startTime + offset &&
+                currentSliderPosition >= subtitle.startTime + offset &&
                 currentSliderPosition < subtitle.endTime + offset
             );
         });
@@ -313,6 +315,10 @@ let AdvancedEditor = () => {
 
         subtitles = distributeSubs(subtitles);
         setSubs(subtitles);
+
+        if (subtitles.length > 0) {
+            setCurrentSub(0);
+        }
     };
 
     const overlaps = (clip1Start, clip1End, clip2Start, clip2End) => {
@@ -392,6 +398,10 @@ let AdvancedEditor = () => {
             return;
         }
         setVideoSource(`localfile://${filePath}`);
+
+        let fileName = filePath.replace(/^.*[\\\/]/, '').replace(/\.[^.]*$/, '');
+        let sanitized = fileName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+        setTitleOverride(sanitized);
     };
 
     let scrub = (milliseconds) => {
@@ -409,6 +419,20 @@ let AdvancedEditor = () => {
     };
 
     let addVideoToGame = async (videoName, clipNumber, collectionId) => {
+        const config = await ConfigAPI.getConfig();
+        if (
+            config.checkSpeakersOnFinalize !== false &&
+            !subs.some((s) => s.speaker)
+        ) {
+            const confirmed = await window.api.send(
+                'showConfirmDialog',
+                { message: 'No speakers are defined. Finalize anyway?' }
+            );
+            if (!confirmed) {
+                return;
+            }
+        }
+
         if (!isEdit && (await checkClipExists(videoName, clipNumber))) {
             setError('Clip with this name and number already exists');
             return;
@@ -449,6 +473,62 @@ let AdvancedEditor = () => {
         } catch (error) {
             console.error(error);
             toast(`Clip add failed!`, { type: 'error' });
+        }
+    };
+
+    let transcribeAudio = async () => {
+        const cfg = await ConfigAPI.getConfig();
+
+        const whisperConfig = {
+            modelSize: cfg.whisperModelSize || 'base',
+            useCuda: cfg.whisperUseCuda !== false,
+            cudaFallbackCpu: cfg.whisperCudaFallbackCpu !== false,
+            suppressSilence: cfg.whisperSuppressSilence !== false,
+        };
+
+        window.api.onProgress((msg, pct) => {
+            let displayMsg = msg || 'Transcribing with Whisper...';
+            if (pct >= 0) displayMsg += ` (${pct}%)`;
+            setInterstitialState({ isOpen: true, message: displayMsg });
+        });
+
+        setInterstitialState({ isOpen: true, message: 'Transcribing with Whisper...' });
+
+        try {
+            let payload = {
+                videoPath: videoSource.replace('localfile://', ''),
+                config: whisperConfig,
+            };
+            if (isBatch && batchClip) {
+                payload.startTime = batchClip.clip.startTime;
+                payload.endTime = batchClip.clip.endTime;
+            }
+
+            const { results } = await window.api.send('transcribeAudio', payload);
+
+            window.api.removeProgressListener();
+            setInterstitialState({ isOpen: false, message: '' });
+
+            const newSubs = results.map((r, i) => ({
+                startTime: r.startTime,
+                endTime: r.endTime,
+                text: r.text,
+                type: 'subtitle',
+                row: 0,
+                speaker: '',
+                voice: 'male',
+            }));
+
+            const distributed = distributeSubs(
+                newSubs.sort((a, b) => a.startTime - b.startTime).map((s, i) => ({ ...s, index: i }))
+            );
+            setSubs(distributed);
+            toast(`Generated ${results.length} subtitles`, { type: 'info' });
+        } catch (err) {
+            window.api.removeProgressListener();
+            setInterstitialState({ isOpen: false, message: '' });
+            console.error(err);
+            toast(`Transcription failed: ${err}`, { type: 'error' });
         }
     };
 
@@ -532,6 +612,7 @@ let AdvancedEditor = () => {
                 <div className="editor-container">
                     <div className="top-pane">
                         <WhatTheDubPlayer
+                            key={playerKey}
                             width="100%"
                             videoSource={videoSource}
                             isPlaying={
@@ -569,6 +650,20 @@ let AdvancedEditor = () => {
                                 }
                             }}
                         />
+                        <div style={{ margin: '10px 0' }}>
+                            <button
+                                onClick={transcribeAudio}
+                                style={{ fontWeight: 'bold' }}
+                            >
+                                Generate Subtitles (Whisper)
+                            </button>
+                            <button
+                                onClick={() => setPlayerKey(k => k + 1)}
+                                style={{ marginLeft: 10 }}
+                            >
+                                Refresh Player
+                            </button>
+                        </div>
                         <SubtitleList
                             game={params.type}
                             currentSliderPosition={

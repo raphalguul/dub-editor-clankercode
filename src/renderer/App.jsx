@@ -18,7 +18,7 @@ import Config from './routes/Config';
 import About from './routes/About';
 import ClipEditor from './routes/editor/ClipEditor';
 import ClipCutter from './routes/editor/ClipCutter';
-import SimpleEditor from './routes/editor/SimpleEditor';
+
 import Interstitial from './components/interstitial/Interstitial';
 
 import riffTraxImage from './images/rifftrax.png';
@@ -83,7 +83,7 @@ let App = (props) => {
     } else if (config && !config.mediaDirectory) {
         return (
             <div className="App">
-                <h1>Dub Launcher</h1>
+                <h1>Dub Editor ClankerCode Edition</h1>
                 <hr />
                 <div>{VERSION}</div>
                 <hr />
@@ -124,7 +124,7 @@ let App = (props) => {
                                 gap: '10px',
                             }}
                         >
-                            <h1>Dub Editor</h1>
+                            <h1>Dub Editor ClankerCode Edition</h1>
                             <div>{VERSION}</div>
                         </div>
                         <div>
@@ -226,18 +226,8 @@ let App = (props) => {
                     />
                     <Route
                         exact
-                        path={`/edit/:id/simple`}
-                        element={<SimpleEditor />}
-                    />
-                    <Route
-                        exact
                         path={`/create/advanced`}
                         element={<AdvancedEditor />}
-                    />
-                    <Route
-                        exact
-                        path={`/create/simple`}
-                        element={<SimpleEditor />}
                     />
                     <Route
                         exact
