@@ -1375,7 +1375,22 @@ ipcMain.handle('normalizeCollection', async (event, { collectionId, game }) => {
 });
 
 ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConfig, startTime, endTime }) => {
-    if (!fs.existsSync(videoPath)) {
+    let resolvedPath = videoPath;
+
+    if (resolvedPath.startsWith('game://')) {
+        const url = resolvedPath.substring('game://'.length);
+        const pattern = /^(rifftrax|whatthedub)\/(.+)\.(mp4|srt|jpg)$/;
+        const match = url.match(pattern);
+        if (!match) {
+            throw new Error('Video file not found');
+        }
+        const { clip } = getClipPaths(match[2], match[1]);
+        resolvedPath = clip;
+    } else if (resolvedPath.startsWith('localfile://')) {
+        resolvedPath = decodeURIComponent(resolvedPath.substring('localfile://'.length));
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
         throw new Error('Video file not found');
     }
 
@@ -1387,7 +1402,7 @@ ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConf
     }
 
     const results = await whisper.transcribe(
-        videoPath,
+        resolvedPath,
         whisperConfig,
         (msg: string) => {
             log.info('[whisper] ' + msg);
