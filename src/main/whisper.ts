@@ -328,13 +328,32 @@ function extractAudioToWav(videoPath: string, startSeconds?: number, durationSec
       cmd = cmd.setDuration(durationSeconds);
     }
 
-    cmd.on('end', () => resolve(wavPath))
-      .on('error', reject)
-      .run();
+    const timeout = setTimeout(() => {
+      cmd.kill('SIGKILL');
+      reject(new Error('FFmpeg timed out after 300s'));
+    }, 300000);
+
+    let settled = false;
+
+    cmd.on('end', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(wavPath);
+    });
+
+    cmd.on('error', (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(err);
+    });
+
+    cmd.run();
   });
 }
 
-function transcribe(
+async function transcribe(
   videoPath: string,
   config: WhisperConfig,
   onLog?: (msg: string) => void,
@@ -342,150 +361,155 @@ function transcribe(
   startSeconds?: number,
   durationSeconds?: number
 ): Promise<SubtitleResult[]> {
-  return new Promise(async (resolve, reject) => {
-    try {
-      onLog?.('Extracting audio from video...');
-      onProgress?.(5);
+  let wavPath: string | undefined;
+  let whisperTmpDir: string | undefined;
 
-      let wavPath: string;
-      try {
-        wavPath = await extractAudioToWav(videoPath, startSeconds, durationSeconds);
-      } catch (err: any) {
-        reject(new Error(`Audio extraction failed: ${err.message}`));
-        return;
-      }
-
-      onLog?.('Audio extracted.');
-      onProgress?.(15);
-
-      let whisperExe: string | null = null;
-      let useCuda = config.useCuda;
-
-      if (useCuda) {
-        whisperExe = await findOrDownloadCudaBinary(onLog);
-        if (!whisperExe && config.cudaFallbackCpu) {
-          onLog?.('CUDA binary not available, falling back to CPU');
-          useCuda = false;
-        }
-      }
-
-      if (!useCuda && !whisperExe) {
-        whisperExe = await findOrDownloadCpuBinary(onLog);
-      }
-
-      if (!whisperExe) {
-        reject(new Error('whisper.cpp binary not found'));
-        return;
-      }
-
-      onLog?.(`Using whisper binary: ${whisperExe}`);
-      onProgress?.(20);
-
-      onLog?.('Resolving model...');
-      const modelPath = await findOrDownloadModel(config.modelSize, onLog);
-      onLog?.(`Model: ${path.basename(modelPath)}`);
-      onProgress?.(25);
-
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dub-editor-whisper-'));
-      const jsonOut = path.join(tmpDir, 'output');
-      const jsonFile = jsonOut + '.json';
-
-      const args: string[] = [
-        '-m',
-        modelPath,
-        '-f',
-        wavPath,
-        '-ojf',
-        '-of',
-        jsonOut,
-      ];
-
-      if (config.suppressSilence) {
-        args.push('--suppress-nst');
-      }
-
-      if (!useCuda) {
-        args.push('-ng');
-      }
-
-      const whisperDir = path.dirname(whisperExe);
-      const env = { ...process.env };
-      env.PATH = whisperDir + path.delimiter + (env.PATH || '');
-
-      onLog?.(`Running whisper.cpp...`);
-      onProgress?.(30);
-
-      await new Promise<void>((res, rej) => {
-        execFile(whisperExe!, args, { env, timeout: 300000 }, (err, stdout, stderr) => {
-          if (stderr) onLog?.(stderr);
-          if (stdout) onLog?.(stdout);
-
-          if (err) {
-            if (useCuda && config.cudaFallbackCpu) {
-              onLog?.('CUDA failed, retrying with CPU...');
-              const cpuExe = path.join(getCpuBinaryDir(), 'whisper.cpp.exe');
-              if (fs.existsSync(cpuExe)) {
-                const cpuArgs = [...args];
-                if (!cpuArgs.includes('-ng')) cpuArgs.push('-ng');
-                execFile(cpuExe, cpuArgs, { env, timeout: 300000 }, (cpuErr, cpuStdout, cpuStderr) => {
-                  if (cpuStderr) onLog?.(cpuStderr);
-                  if (cpuErr) rej(cpuErr);
-                  else res();
-                });
-                return;
-              }
-            }
-            rej(err);
-          } else {
-            res();
-          }
-        });
-      });
-
-      onProgress?.(85);
-
-      if (!fs.existsSync(jsonFile)) {
-        reject(new Error('whisper.cpp produced no output file'));
-        return;
-      }
-
-      const data = JSON.parse(fs.readFileSync(jsonFile, 'utf-8'));
-      const results: SubtitleResult[] = [];
-      let index = 1;
-
-      for (const segment of data.transcription || []) {
-        const text = segment.text?.trim().replace(/^-\s*/, '') || '';
-        const offsets = segment.offsets || {};
-        const startSeconds = (offsets.from || 0) / 1000.0;
-        const endSeconds = (offsets.to || 0) / 1000.0;
-
-        results.push({
-          index,
-          startTime: Math.round(startSeconds * 1000),
-          endTime: Math.round(endSeconds * 1000),
-          text,
-        });
-        index++;
-      }
-
-      onProgress?.(100);
-      onLog?.(`Transcription complete: ${results.length} segments`);
-
+  const cleanup = () => {
+    if (wavPath) {
       try {
         fs.unlinkSync(wavPath);
-        const wavDir = path.dirname(wavPath);
-        fs.rmdirSync(wavDir);
+        fs.rmdirSync(path.dirname(wavPath));
       } catch {}
-
-      try {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {}
-
-      resolve(results);
-    } catch (err: any) {
-      reject(new Error(`Transcription failed: ${err.message}`));
     }
-  });
+    if (whisperTmpDir) {
+      try {
+        fs.rmSync(whisperTmpDir, { recursive: true, force: true });
+      } catch {}
+    }
+  };
+
+  try {
+    onLog?.('Extracting audio from video...');
+    onProgress?.(5);
+
+    wavPath = await extractAudioToWav(videoPath, startSeconds, durationSeconds);
+
+    onLog?.('Audio extracted.');
+    onProgress?.(15);
+
+    let whisperExe: string | null = null;
+    let useCuda = config.useCuda;
+
+    if (useCuda) {
+      whisperExe = await findOrDownloadCudaBinary(onLog);
+      if (!whisperExe && config.cudaFallbackCpu) {
+        onLog?.('CUDA binary not available, falling back to CPU');
+        useCuda = false;
+      }
+    }
+
+    if (!useCuda && !whisperExe) {
+      whisperExe = await findOrDownloadCpuBinary(onLog);
+    }
+
+    if (!whisperExe) {
+      throw new Error('whisper.cpp binary not found');
+    }
+
+    onLog?.(`Using whisper binary: ${whisperExe}`);
+    onProgress?.(20);
+
+    onLog?.('Resolving model...');
+    const modelPath = await findOrDownloadModel(config.modelSize, onLog);
+    onLog?.(`Model: ${path.basename(modelPath)}`);
+    onProgress?.(25);
+
+    whisperTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dub-editor-whisper-'));
+    const jsonOut = path.join(whisperTmpDir, 'output');
+    const jsonFile = jsonOut + '.json';
+
+    const args: string[] = [
+      '-m',
+      modelPath,
+      '-f',
+      wavPath,
+      '-ojf',
+      '-of',
+      jsonOut,
+    ];
+
+    if (config.suppressSilence) {
+      args.push('--suppress-nst');
+    }
+
+    if (!useCuda) {
+      args.push('-ng');
+    }
+
+    const whisperDir = path.dirname(whisperExe);
+    const env = { ...process.env };
+    env.PATH = whisperDir + path.delimiter + (env.PATH || '');
+
+    onLog?.(`Running whisper.cpp...`);
+    onProgress?.(30);
+
+    await new Promise<void>((res, rej) => {
+      execFile(whisperExe!, args, {
+        env,
+        timeout: 300000,
+        maxBuffer: 50 * 1024 * 1024,
+      }, (err, stdout, stderr) => {
+        if (stderr) onLog?.(stderr);
+        if (stdout) onLog?.(stdout);
+
+        if (err) {
+          if (useCuda && config.cudaFallbackCpu) {
+            onLog?.('CUDA failed, retrying with CPU...');
+            const cpuExe = path.join(getCpuBinaryDir(), 'whisper.cpp.exe');
+            if (fs.existsSync(cpuExe)) {
+              const cpuArgs = [...args];
+              if (!cpuArgs.includes('-ng')) cpuArgs.push('-ng');
+              execFile(cpuExe, cpuArgs, {
+                env,
+                timeout: 300000,
+                maxBuffer: 50 * 1024 * 1024,
+              }, (cpuErr, cpuStdout, cpuStderr) => {
+                if (cpuStderr) onLog?.(cpuStderr);
+                if (cpuErr) rej(cpuErr);
+                else res();
+              });
+              return;
+            }
+          }
+          rej(err);
+        } else {
+          res();
+        }
+      });
+    });
+
+    onProgress?.(85);
+
+    if (!fs.existsSync(jsonFile)) {
+      throw new Error('whisper.cpp produced no output file');
+    }
+
+    const data = JSON.parse(fs.readFileSync(jsonFile, 'utf-8'));
+    const results: SubtitleResult[] = [];
+    let index = 1;
+
+    for (const segment of data.transcription || []) {
+      const text = segment.text?.trim().replace(/^-\s*/, '') || '';
+      const offsets = segment.offsets || {};
+      const startSeconds = (offsets.from || 0) / 1000.0;
+      const endSeconds = (offsets.to || 0) / 1000.0;
+
+      results.push({
+        index,
+        startTime: Math.round(startSeconds * 1000),
+        endTime: Math.round(endSeconds * 1000),
+        text,
+      });
+      index++;
+    }
+
+    onProgress?.(100);
+    onLog?.(`Transcription complete: ${results.length} segments`);
+
+    return results;
+  } finally {
+    cleanup();
+  }
 }
 
 function findModelFile(modelName: string): string | null {

@@ -79,6 +79,8 @@ let ClipCutter = () => {
         defaultClipSize,
         videoLength
     };
+
+    const playClipRangeRef = useRef(null);
     const keyboardHandler = useCallback((event) => {
         console.log('EVENT: ' + event.key);
         if (isActiveElementInput()) {
@@ -255,6 +257,15 @@ let ClipCutter = () => {
         setIsPlaying(false);
     };
 
+    const playClip = (clip) => {
+        playClipRangeRef.current = {
+            startTime: clip.startTime,
+            endTime: clip.endTime,
+        };
+        scrub(clip.startTime);
+        setIsPlaying(true);
+    };
+
     const clipChangeHandler = (mode, clip) => {
         if (mode === 'add') {
             let newClipIndex = 0;
@@ -329,12 +340,23 @@ let ClipCutter = () => {
                             subs={[]}
                             onEnd={() => {
                                 setIsPlaying(false);
+                                playClipRangeRef.current = null;
                             }}
                             onIndexChange={(index) => {
                                 setCurrentClip(index);
                             }}
                             onVideoPositionChange={(position) => {
                                 setCurrentSliderPosition(position * 1000);
+                                if (
+                                    playClipRangeRef.current &&
+                                    position * 1000 >=
+                                        playClipRangeRef.current.startTime &&
+                                    position * 1000 >=
+                                        playClipRangeRef.current.endTime
+                                ) {
+                                    setIsPlaying(false);
+                                    playClipRangeRef.current = null;
+                                }
                             }}
                             onVideoLoaded={(video) => {
                                 setVideoLength(video.duration);
@@ -350,6 +372,7 @@ let ClipCutter = () => {
                             initialTitle={clipName}
                             onClipsChange={clipChangeHandler}
                             onSelectClip={setCurrentClip}
+                            onPlayClip={playClip}
                             onProcess={async (title, clips) => {
                                 await handleInterstitial(
                                     BatchAPI.storeBatch(

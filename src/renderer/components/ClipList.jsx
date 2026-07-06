@@ -28,6 +28,7 @@ export default ({
     onClipsChange,
     onSelectClip,
     onProcess,
+    onPlayClip,
     initialTitle,
 }) => {
     const [clipTitle, setClipTitle] = useState(initialTitle || '');
@@ -102,6 +103,17 @@ export default ({
                                         {convertMillisecondsToTimestamp(
                                             clip.endTime
                                         )}
+                                    </td>
+                                    <td>
+                                        <button
+                                            title="Play Clip"
+                                            onClick={(e) => {
+                                                onPlayClip(clip);
+                                                e.stopPropagation();
+                                            }}
+                                        >
+                                            ▶
+                                        </button>
                                     </td>
                                     <td>
                                         <button

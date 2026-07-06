@@ -836,6 +836,13 @@ app.on('window-all-closed', () => {
     }
 });
 
+app.on('render-process-gone', (_event, _webContents, details) => {
+    log.error(`Render process gone (reason: ${details.reason}, exitCode: ${details.exitCode})`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.reload();
+    }
+});
+
 app.whenReady()
     .then(() => {
         createWindow();
