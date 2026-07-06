@@ -41,6 +41,7 @@ let ClipCutter = () => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentPosition, setCurrentPosition] = useState(0);
     const [currentSliderPosition, setCurrentSliderPosition] = useState(0);
+    const [seekKey, setSeekKey] = useState(0);
 
     const [videoLength, setVideoLength] = useState(0);
     const [clipName, setClipName] = useState('');
@@ -264,6 +265,7 @@ let ClipCutter = () => {
         };
         scrub(clip.startTime);
         setIsPlaying(true);
+        setSeekKey((k) => k + 1);
     };
 
     const clipChangeHandler = (mode, clip) => {
@@ -336,6 +338,7 @@ let ClipCutter = () => {
                             videoSource={videoSource}
                             isPlaying={isPlaying}
                             videoPosition={currentPosition}
+                            seekKey={seekKey}
                             substitution={substitution}
                             subs={[]}
                             onEnd={() => {

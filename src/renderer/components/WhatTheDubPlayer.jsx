@@ -32,7 +32,7 @@ export default (props) => {
         isTalking = false;
         setMuted(false);
         currentIndexRef.current = -1;
-    }, [props.videoPosition]);
+    }, [props.videoPosition, props.seekKey]);
 
     useEffect(() => {
         if (props.isPlaying) {
