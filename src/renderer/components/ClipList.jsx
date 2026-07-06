@@ -206,6 +206,20 @@ export default ({
                                 </button>
                             </td>
                         </tr>
+                        <tr>
+                            <td>
+                                <label>Length</label>
+                            </td>
+                            <td>
+                                {currentClipObject
+                                    ? convertMillisecondsToTimestamp(
+                                          currentClipObject.endTime -
+                                              currentClipObject.startTime
+                                      )
+                                    : ''}
+                            </td>
+                            <td></td>
+                        </tr>
                     </table>
                 </div>
         </div>
