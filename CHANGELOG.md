@@ -8,6 +8,7 @@
 - Added segment playback (only plays the currently selected clip, ideal for previewing before finalizing a batch)
 - Automatic Clip naming (manual naming is still available)
 - Added more robust re-encoding to prevent the videostream copy from snapping to keyframes (this used to result in batch clips that didn't exactly align with the In/Out points the user set)
+- Many minor bugs fixed
 ## Improved filetype and codec support
 - Incompatible files will now be encoded for playback (should improve file compatibility, creates temporary files for quicker reload)
 - Clips will always be encoded to be compatible with WTD
