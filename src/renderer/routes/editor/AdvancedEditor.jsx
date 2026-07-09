@@ -14,7 +14,7 @@ import BatchAPI from 'renderer/api/BatchAPI';
 import { useAtom } from 'jotai';
 import { interstitialAtom } from 'renderer/atoms/interstitial.atom';
 import { handleInterstitial } from 'renderer/components/interstitial/Interstitial';
-import VideoAPI from 'renderer/api/VideoAPI';
+import VideoAPI, { canPlayDirect } from 'renderer/api/VideoAPI';
 import { gameAtom } from 'renderer/atoms/game.atom';
 import ConfigAPI from 'renderer/api/ConfigAPI';
 
@@ -34,19 +34,21 @@ let AdvancedEditor = () => {
 
     const [titleOverride, setTitleOverride] = useState(null);
     const [clipNumberOverride, setClipNumberOverride] = useState(null);
-    const [isEdit, setIsEdit] = useState(id !== undefined);
+    const [isEdit] = useState(id !== undefined);
 
     const [batchClip, setBatchClip] = useState(null);
     const [offset, setOffset] = useState(0);
-    const [startTime, setStartTime] = useState(0);
-    const [endTime, setEndTime] = useState(0);
+    const [, setEndTime] = useState(0);
 
     const [error, setError] = useState(null);
     const [videoSource, setVideoSource] = useState('');
     const [subs, setSubs] = useState([]);
     const [currentSub, setCurrentSub] = useState(null);
-    const [substitution, setSubstitution] = useState('');
-    const [buttonsDisabled, setButtonsDisabled] = useState(false);
+    const [selectedAudioTrack, setSelectedAudioTrack] = useState(0);
+    const [playbackSource, setPlaybackSource] = useState('');
+    const playbackSourceRef = useRef('');
+    const [substitution] = useState('');
+    const [, setButtonsDisabled] = useState(false);
     const [playerKey, setPlayerKey] = useState(0);
 
     const [isPlaying, setIsPlaying] = useState(false);
@@ -59,13 +61,6 @@ let AdvancedEditor = () => {
 
     let videoLengthMs = videoLength * 1000;
     let defaultClipSize = videoLengthMs * 0.1;
-
-    let game = '';
-    if (params.type === 'rifftrax') {
-        game = 'RiffTrax';
-    } else if (params.type === 'whatthedub') {
-        game = 'What the Dub';
-    }
 
     let isBatch = searchParams.get('batch') === 'true';
 
@@ -280,6 +275,14 @@ let AdvancedEditor = () => {
         }
     }, [currentSliderPosition]);
 
+    useEffect(() => {
+        return () => {
+            if (playbackSourceRef.current) {
+                VideoAPI.cleanupTempFile(playbackSourceRef.current).catch(() => {});
+            }
+        };
+    }, []);
+
     const getVideo = async (id) => {
         let videoDetails = await window.api.send('getVideo', {
             id,
@@ -311,7 +314,13 @@ let AdvancedEditor = () => {
 
         setTitleOverride(title.slice(1).replaceAll('_', ' '));
         setClipNumberOverride(parseInt(clipNumber));
-        setVideoSource(`game://${params.type}/${id}.mp4`);
+        setVideoSource(videoDetails.videoUrl);
+        setPlaybackSource(videoDetails.videoUrl);
+        playbackSourceRef.current = videoDetails.videoUrl;
+
+        let mediaInfo = await VideoAPI.getAudioTracks(videoDetails.videoUrl);
+        let firstAudioIndex = mediaInfo.tracks[0]?.index ?? 0;
+        setSelectedAudioTrack(firstAudioIndex);
 
         subtitles = distributeSubs(subtitles);
         setSubs(subtitles);
@@ -381,11 +390,48 @@ let AdvancedEditor = () => {
                 });
             }
         );
-        let { clip, video, title, clipNumber } = batchClip;
+        let { clip, video, title, clipNumber, audioTrackIndex } = batchClip;
+
+        const config = await ConfigAPI.getConfig();
+        if (config.autoIncrementClipNumber !== false) {
+            let availableNumber = await api.send('findAvailableClipNumber', {
+                title,
+                startNumber: clipNumber,
+                game: params.type,
+            });
+            if (availableNumber !== null) {
+                setClipNumberOverride(availableNumber);
+            }
+        }
+
+        let mediaInfo = await VideoAPI.getAudioTracks(video);
+        let firstAudioIndex = mediaInfo.tracks[0]?.index ?? 0;
+        let track = audioTrackIndex !== undefined ? audioTrackIndex : firstAudioIndex;
+
+        let playSource;
+        if (canPlayDirect(video, mediaInfo, track)) {
+            playSource = video;
+        } else {
+            setInterstitialState({ isOpen: true, message: 'Preparing video for playback...' });
+            VideoAPI.onRemuxProgress((pct) => {
+                setInterstitialState({ isOpen: true, message: `Preparing video for playback... ${pct}%` });
+            });
+            try {
+                playSource = await VideoAPI.remuxForPlayback(video, track);
+            } catch (err) {
+                console.error('Remux failed, using original:', err);
+                playSource = video;
+            }
+            VideoAPI.removeRemuxProgressListener();
+            setInterstitialState({ isOpen: false, message: '' });
+        }
+
         setVideoSource(video);
+        setPlaybackSource(playSource);
+        playbackSourceRef.current = playSource;
+        setSelectedAudioTrack(track);
         setVideoLength((clip.endTime - clip.startTime) / 1000);
         setBatchClip(batchClip);
-        setStartTime(clip.startTime);
         setEndTime(clip.endTime);
         setOffset(clip.startTime);
         setCurrentSliderPosition(clip.startTime);
@@ -397,11 +443,55 @@ let AdvancedEditor = () => {
         if (!filePath) {
             return;
         }
-        setVideoSource(`localfile://${filePath}`);
 
+        let source = `localfile:///${encodeURI(filePath.replace(/\\/g, '/'))}`;
         let fileName = filePath.replace(/^.*[\\\/]/, '').replace(/\.[^.]*$/, '');
         let sanitized = fileName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
         setTitleOverride(sanitized);
+
+        const config = await ConfigAPI.getConfig();
+        if (config.autoIncrementClipNumber !== false) {
+            let availableNumber = await api.send('findAvailableClipNumber', {
+                title: sanitized,
+                startNumber: 1,
+                game: params.type,
+            });
+            if (availableNumber !== null) {
+                setClipNumberOverride(availableNumber);
+            }
+        }
+
+        let mediaInfo = await VideoAPI.getAudioTracks(source);
+        let firstAudioIndex = mediaInfo.tracks[0]?.index ?? 0;
+        let selectedTrack = firstAudioIndex;
+
+        if (mediaInfo.tracks.length > 1) {
+            let pick = await VideoAPI.showAudioTrackPrompt(mediaInfo.tracks);
+            if (pick !== -1) selectedTrack = pick;
+        }
+
+        let playSource;
+        if (canPlayDirect(source, mediaInfo, selectedTrack)) {
+            playSource = source;
+        } else {
+            setInterstitialState({ isOpen: true, message: 'Preparing video for playback...' });
+            VideoAPI.onRemuxProgress((pct) => {
+                setInterstitialState({ isOpen: true, message: `Preparing video for playback... ${pct}%` });
+            });
+            try {
+                playSource = await VideoAPI.remuxForPlayback(source, selectedTrack);
+            } catch (err) {
+                console.error('Remux failed, using original:', err);
+                playSource = source;
+            }
+            VideoAPI.removeRemuxProgressListener();
+            setInterstitialState({ isOpen: false, message: '' });
+        }
+
+        setVideoSource(source);
+        setPlaybackSource(playSource);
+        playbackSourceRef.current = playSource;
+        setSelectedAudioTrack(selectedTrack);
     };
 
     let scrub = (milliseconds) => {
@@ -434,8 +524,28 @@ let AdvancedEditor = () => {
         }
 
         if (!isEdit && (await checkClipExists(videoName, clipNumber))) {
-            setError('Clip with this name and number already exists');
-            return;
+            const config = await ConfigAPI.getConfig();
+            if (config.autoIncrementClipNumber !== false) {
+                let availableNumber = await api.send('findAvailableClipNumber', {
+                    title: videoName,
+                    startNumber: clipNumber,
+                    game: params.type,
+                });
+                if (availableNumber !== null) {
+                    clipNumber = availableNumber;
+                    toast(`Clip number auto-incremented to ${clipNumber}`, {
+                        type: 'info',
+                    });
+                } else {
+                    setError(
+                        'Clip with this name already exists (all numbers up to 10000 are taken)'
+                    );
+                    return;
+                }
+            } else {
+                setError('Clip with this name and number already exists');
+                return;
+            }
         }
 
         setError(null);
@@ -448,7 +558,8 @@ let AdvancedEditor = () => {
                 videoName,
                 clipNumber,
                 params.type,
-                isBatch
+                isBatch,
+                selectedAudioTrack
             );
             if (!collectionId.startsWith('_')) {
                 await CollectionAPI.addToCollection(
@@ -496,8 +607,9 @@ let AdvancedEditor = () => {
 
         try {
             let payload = {
-                videoPath: videoSource.replace('localfile://', ''),
+                videoPath: videoSource,
                 config: whisperConfig,
+                audioTrackIndex: selectedAudioTrack,
             };
             if (isBatch && batchClip) {
                 payload.startTime = batchClip.clip.startTime;
@@ -509,7 +621,7 @@ let AdvancedEditor = () => {
             window.api.removeProgressListener();
             setInterstitialState({ isOpen: false, message: '' });
 
-            const newSubs = results.map((r, i) => ({
+            const newSubs = results.map((r, _i) => ({
                 startTime: r.startTime,
                 endTime: r.endTime,
                 text: r.text,
@@ -614,7 +726,7 @@ let AdvancedEditor = () => {
                         <WhatTheDubPlayer
                             key={playerKey}
                             width="100%"
-                            videoSource={videoSource}
+                            videoSource={playbackSource}
                             isPlaying={
                                 isPlaying &&
                                 (!batchClip ||
@@ -670,9 +782,10 @@ let AdvancedEditor = () => {
                                 currentSliderPosition - offset
                             }
                             videoId={id}
-                            clipNumberOverride={
-                                batchClip?.clipNumber || clipNumberOverride
-                            }
+                                clipNumberOverride={
+                                    clipNumberOverride ??
+                                    batchClip?.clipNumber
+                                }
                             isEdit={isEdit}
                             titleOverride={batchClip?.title || titleOverride}
                             currentSub={currentSub}

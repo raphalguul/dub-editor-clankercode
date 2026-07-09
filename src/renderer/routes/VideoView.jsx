@@ -6,7 +6,7 @@ import { convertSrtToSubtitles } from '../util/VideoTools';
 import { useAtom } from 'jotai';
 import { gameAtom } from 'renderer/atoms/game.atom';
 
-let VideoView = (props) => {
+let VideoView = () => {
     let params = useParams();
     const [game] = useAtom(gameAtom);
     const [videoDetails, setVideoDetails] = useState(null);
@@ -17,10 +17,16 @@ let VideoView = (props) => {
 
     useEffect(() => {
         (async () => {
+            window.api.send('log', 'VIDEOVIEW: fetching getVideo id=' + params.id);
             const video = await window.api.send('getVideo', params);
+            window.api.send('log', 'VIDEOVIEW: got videoUrl=' + video.videoUrl);
             setVideoDetails(video);
         })();
     }, []);
+
+    useEffect(() => {
+        if (videoDetails) window.api.send('log', 'VIDEOVIEW: state set url="' + videoDetails.videoUrl + '"');
+    }, [videoDetails]);
 
     return (
         <div>
@@ -35,14 +41,14 @@ let VideoView = (props) => {
                     <div>Name: {videoDetails.name}</div>
                     <div>
                         <WhatTheDubPlayer
-                            videoSource={`game://${params.game}/${params.id}.mp4`}
+                            videoSource={videoDetails.videoUrl}
                             isPlaying={false}
                             videoPosition={0}
                             subs={convertSrtToSubtitles(videoDetails.srtBase64)}
                             onEnd={() => {}}
-                            onIndexChange={(index) => {}}
-                            onVideoPositionChange={(position) => {}}
-                            onVideoLoaded={(video) => {}}
+                            onIndexChange={(_index) => {}}
+                            onVideoPositionChange={(_position) => {}}
+                            onVideoLoaded={(_video) => {}}
                             controls={true}
                         />
                     </div>

@@ -22,6 +22,18 @@ const SPEAKER_CONFIRM_HELP_TEXT = (
     </>
 );
 
+const AUTO_INCREMENT_HELP_TEXT = (
+    <>
+        <h4>Auto-increment clip number on duplicate</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            When enabled, the editor automatically finds an available clip
+            number (iterating upwards from 1) instead of showing a warning
+            when a clip with the same name already exists. Capped at 10000
+            iterations to prevent infinite loops.
+        </p>
+    </>
+);
+
 const FIXSUBS_HELP_TEXT = (
     <>
         <h4>Fix Subtitles on Load</h4>
@@ -300,6 +312,11 @@ const Config = (props) => {
                     'Warn if no speakers on Finalize',
                     'checkSpeakersOnFinalize',
                     SPEAKER_CONFIRM_HELP_TEXT
+                )}
+                {checkboxRow(
+                    'Auto-increment clip number on duplicate',
+                    'autoIncrementClipNumber',
+                    AUTO_INCREMENT_HELP_TEXT
                 )}
             </tbody>
         </table>

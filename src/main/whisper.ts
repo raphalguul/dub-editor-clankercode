@@ -270,7 +270,7 @@ async function findOrDownloadCudaBinary(
   try {
     await downloadFile(url, zipPath);
     onLog?.('Extracting CUDA whisper.cpp...');
-    const files = await extractZip(zipPath, binDir);
+    await extractZip(zipPath, binDir);
 
     if (fs.existsSync(path.join(binDir, 'whisper-cli.exe'))) {
       fs.renameSync(
@@ -309,7 +309,7 @@ async function findOrDownloadModel(
   return modelPath;
 }
 
-function extractAudioToWav(videoPath: string, startSeconds?: number, durationSeconds?: number): Promise<string> {
+function extractAudioToWav(videoPath: string, startSeconds?: number, durationSeconds?: number, audioTrackIndex?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dub-editor-audio-'));
     const wavPath = path.join(tmpDir, 'audio.wav');
@@ -318,8 +318,13 @@ function extractAudioToWav(videoPath: string, startSeconds?: number, durationSec
       .audioFilters('highpass=f=80,dynaudnorm')
       .audioFrequency(16000)
       .audioChannels(1)
-      .audioQuality(9)
-      .output(wavPath);
+      .audioQuality(9);
+
+    if (audioTrackIndex !== undefined) {
+      cmd = cmd.outputOptions(['-map', `0:${audioTrackIndex}`]);
+    }
+
+    cmd = cmd.output(wavPath);
 
     if (startSeconds !== undefined && startSeconds > 0) {
       cmd = cmd.setStartTime(startSeconds);
@@ -359,7 +364,8 @@ async function transcribe(
   onLog?: (msg: string) => void,
   onProgress?: (percent: number) => void,
   startSeconds?: number,
-  durationSeconds?: number
+  durationSeconds?: number,
+  audioTrackIndex?: number
 ): Promise<SubtitleResult[]> {
   let wavPath: string | undefined;
   let whisperTmpDir: string | undefined;
@@ -382,7 +388,7 @@ async function transcribe(
     onLog?.('Extracting audio from video...');
     onProgress?.(5);
 
-    wavPath = await extractAudioToWav(videoPath, startSeconds, durationSeconds);
+    wavPath = await extractAudioToWav(videoPath, startSeconds, durationSeconds, audioTrackIndex);
 
     onLog?.('Audio extracted.');
     onProgress?.(15);

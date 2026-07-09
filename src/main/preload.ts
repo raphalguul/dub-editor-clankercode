@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
         // whitelist channels
         const validChannels = [
             'clipExists',
+            'findAvailableClipNumber',
             'fileExists',
             'updateConfig',
             'getConfig',
@@ -24,22 +25,25 @@ contextBridge.exposeInMainWorld('api', {
             'storeVideo',
             'storeTempVideo',
             'deleteVideo',
-            'disableVideos',
             'createCollection',
             'deleteCollection',
             'getCollections',
             'addToCollection',
             'removeFromCollection',
+            'showAudioTrackPrompt',
             'exportCollection',
-            'setActive',
             'showConfirmDialog',
             'openDialog',
             'openVideoFile',
+            'getAudioTracks',
+            'remuxForPlayback',
+            'cleanupTempFile',
             'importZip',
             'getSubtitle',
             'normalizeAudio',
             'normalizeCollection',
-            'transcribeAudio'
+            'transcribeAudio',
+            'log'
         ];
         if (validChannels.includes(channel)) {
             return await ipcRenderer.invoke(channel, args);
@@ -52,5 +56,11 @@ contextBridge.exposeInMainWorld('api', {
     },
     removeProgressListener: () => {
         ipcRenderer.removeAllListeners('whisper:progress');
+    },
+    onRemuxProgress: (callback: (pct: number) => void) => {
+        ipcRenderer.on('remuxProgress', (event, pct) => callback(pct));
+    },
+    removeRemuxProgressListener: () => {
+        ipcRenderer.removeAllListeners('remuxProgress');
     },
 });

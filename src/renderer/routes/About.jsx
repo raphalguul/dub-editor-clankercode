@@ -1,6 +1,6 @@
 import React from 'react';
 
-const About = (props) => {
+const About = () => {
     return (
         <div style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
             <h3>About</h3>

@@ -1,22 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { Link } from 'react-router-dom';
-import { toast } from 'react-toastify';
-import { addVideo } from '../../util/VideoTools';
-
-import { api } from '../../util/Api';
 
 import WhatTheDubPlayer from '../../components/WhatTheDubPlayer';
 import TimeLine from '../../components/TimeLine';
-import SubtitleList from '../../components/SubtitleList';
-import CollectionAPI from '../../api/CollectionAPI';
 import BatchAPI from '../../api/BatchAPI';
 
 import ClipList from 'renderer/components/ClipList';
 import { interstitialAtom } from 'renderer/atoms/interstitial.atom';
 import { handleInterstitial } from 'renderer/components/interstitial/Interstitial';
 import { useAtom } from 'jotai';
-import VideoAPI from 'renderer/api/VideoAPI';
+import VideoAPI, { canPlayDirect } from 'renderer/api/VideoAPI';
 import { gameAtom } from 'renderer/atoms/game.atom';
 
 let ClipCutter = () => {
@@ -31,12 +25,14 @@ let ClipCutter = () => {
         height: window.innerHeight,
     });
 
-    const [error, setError] = useState(null);
+    const [error] = useState(null);
     const [videoSource, setVideoSource] = useState('');
     const [clips, setClips] = useState([]);
     const [currentClip, setCurrentClip] = useState(null);
-    const [substitution, setSubstitution] = useState('');
-    const [buttonsDisabled, setButtonsDisabled] = useState(false);
+    const [selectedAudioTrack, setSelectedAudioTrack] = useState(0);
+    const [playbackSource, setPlaybackSource] = useState('');
+    const playbackSourceRef = useRef('');
+    const [substitution] = useState('');
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentPosition, setCurrentPosition] = useState(0);
@@ -48,13 +44,6 @@ let ClipCutter = () => {
 
     let videoLengthMs = videoLength * 1000;
     let defaultClipSize = videoLengthMs * 0.1; // The recommended maximum length
-
-    let game = '';
-    if (params.type === 'rifftrax') {
-        game = 'RiffTrax';
-    } else if (params.type === 'whatthedub') {
-        game = 'What the Dub';
-    }
 
     window.onresize = () => {
         setWindowSize({ width: window.innerWidth, height: window.innerHeight });
@@ -138,27 +127,51 @@ let ClipCutter = () => {
             case 'i': {
                 let currentClipObject =
                     stateRef.current.clips[stateRef.current.currentClip];
-                clipChangeHandler(
-                    'edit',
-                    {
-                        ...currentClipObject,
-                        startTime: stateRef.current.currentSliderPosition,
-                    },
-                    stateRef.current.currentClip
-                );
+                if (!currentClipObject || currentClipObject?.locked) {
+                    clipChangeHandler('add', {
+                        rowIndex: 0,
+                        startTime: parseInt(stateRef.current.currentSliderPosition),
+                        endTime: Math.min(
+                            parseInt(stateRef.current.currentSliderPosition) +
+                            stateRef.current.defaultClipSize,
+                            stateRef.current.videoLength * 1000
+                        ),
+                    });
+                } else {
+                    clipChangeHandler(
+                        'edit',
+                        {
+                            ...currentClipObject,
+                            startTime: stateRef.current.currentSliderPosition,
+                        },
+                        stateRef.current.currentClip
+                    );
+                }
                 break;
             }
             case 'o': {
                 let currentClipObject =
                     stateRef.current.clips[stateRef.current.currentClip];
-                clipChangeHandler(
-                    'edit',
-                    {
-                        ...currentClipObject,
-                        endTime: stateRef.current.currentSliderPosition,
-                    },
-                    stateRef.current.currentClip
-                );
+                if (!currentClipObject || currentClipObject?.locked) {
+                    let newStart = Math.max(0,
+                        parseInt(stateRef.current.currentSliderPosition) -
+                        stateRef.current.defaultClipSize
+                    );
+                    clipChangeHandler('add', {
+                        rowIndex: 0,
+                        startTime: newStart,
+                        endTime: parseInt(stateRef.current.currentSliderPosition),
+                    });
+                } else {
+                    clipChangeHandler(
+                        'edit',
+                        {
+                            ...currentClipObject,
+                            endTime: stateRef.current.currentSliderPosition,
+                        },
+                        stateRef.current.currentClip
+                    );
+                }
                 break;
             }
             case '[': {
@@ -219,29 +232,57 @@ let ClipCutter = () => {
         }
     }, [currentSliderPosition]);
 
+    useEffect(() => {
+        return () => {
+            if (playbackSourceRef.current) {
+                VideoAPI.cleanupTempFile(playbackSourceRef.current).catch(() => {});
+            }
+        };
+    }, []);
+
     let onFileOpen = async () => {
         let filePath = await VideoAPI.getVideoFile();
         if (!filePath) {
             return;
         }
-        setVideoSource(`localfile://${filePath}`);
 
+        let source = `localfile:///${encodeURI(filePath.replace(/\\/g, '/'))}`;
         let fileName = filePath.replace(/^.*[\\\/]/, '').replace(/\.[^.]*$/, '');
         let sanitized = fileName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
         setClipName(sanitized);
-    };
 
-    let convertSecondsToTimestamp = (seconds) => {
-        let h = Math.floor(seconds / 3600);
-        let m = Math.floor((seconds % 3600) / 60);
-        let s = Math.floor(seconds % 60);
-        let ms = Math.floor((seconds - Math.trunc(seconds)) * 1000);
+        let mediaInfo = await VideoAPI.getAudioTracks(source);
+        let tracks = mediaInfo.tracks;
+        let firstAudioIndex = tracks[0]?.index ?? 0;
+        let selectedTrack = firstAudioIndex;
 
-        return `${h.toString().padStart(2, '0')}:${m
-            .toString()
-            .padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms
-            .toString()
-            .padStart(3, '0')}`;
+        if (tracks.length > 1) {
+            let pick = await VideoAPI.showAudioTrackPrompt(tracks);
+            if (pick !== -1) selectedTrack = pick;
+        }
+
+        let playSource;
+        if (canPlayDirect(source, mediaInfo, selectedTrack)) {
+            playSource = source;
+        } else {
+            setInterstitialState({ isOpen: true, message: 'Preparing video for playback...' });
+            VideoAPI.onRemuxProgress((pct) => {
+                setInterstitialState({ isOpen: true, message: `Preparing video for playback... ${pct}%` });
+            });
+            try {
+                playSource = await VideoAPI.remuxForPlayback(source, selectedTrack);
+            } catch (err) {
+                console.error('Remux failed, using original:', err);
+                playSource = source;
+            }
+            VideoAPI.removeRemuxProgressListener();
+            setInterstitialState({ isOpen: false, message: '' });
+        }
+
+        setVideoSource(source);
+        setPlaybackSource(playSource);
+        playbackSourceRef.current = playSource;
+        setSelectedAudioTrack(selectedTrack);
     };
 
     let scrub = (milliseconds) => {
@@ -279,6 +320,7 @@ let ClipCutter = () => {
                     }
                     return {
                         ...modifiedClip,
+                        locked: modifiedClip.locked ?? false,
                         index,
                     };
                 });
@@ -335,7 +377,7 @@ let ClipCutter = () => {
                     <div className="top-pane">
                         <WhatTheDubPlayer
                             width="100%"
-                            videoSource={videoSource}
+                            videoSource={playbackSource}
                             isPlaying={isPlaying}
                             videoPosition={currentPosition}
                             seekKey={seekKey}
@@ -381,7 +423,8 @@ let ClipCutter = () => {
                                     BatchAPI.storeBatch(
                                         clips,
                                         videoSource,
-                                        title
+                                        title,
+                                        selectedAudioTrack
                                     ),
                                     (isOpen) => {
                                         setInterstitialState({

@@ -4,7 +4,6 @@ import {
     Route,
     NavLink as Link,
     Navigate,
-    useNavigate,
     useLocation,
 } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
@@ -12,7 +11,6 @@ import { ToastContainer } from 'react-toastify';
 import AdvancedEditor from './routes/editor/AdvancedEditor';
 import VideoList from './routes/VideoList';
 import VideoView from './routes/VideoView';
-import Launcher from './routes/Launcher';
 import CollectionManager from './routes/CollectionManager';
 import Config from './routes/Config';
 import About from './routes/About';
@@ -51,16 +49,11 @@ if (viewportMeta) {
     );
 }
 
-let App = (props) => {
-    const navigate = useNavigate();
+let App = () => {
     const location = useLocation();
-    const [interstitialState, setInterstitialState] = useAtom(interstitialAtom);
+    const [interstitialState] = useAtom(interstitialAtom);
     const [game, setGame] = useAtom(gameAtom);
     const [config, setConfig] = useState({});
-
-    const changeGame = (newGame) => {
-        setGame(newGame);
-    };
 
     const saveConfig = async (partial) => {
         await window.api.send('updateConfig', partial);

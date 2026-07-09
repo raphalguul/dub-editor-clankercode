@@ -1,6 +1,7 @@
 import CollectionAPI from 'renderer/api/CollectionAPI';
+import ConfigAPI from 'renderer/api/ConfigAPI';
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 let convertMillisecondsToTimestamp = (milliseconds) => {
     if (milliseconds === undefined || milliseconds === null) {
@@ -32,7 +33,6 @@ export default ({
     videoLength,
     onSubsChange,
     onSelectSub,
-    onRemoveSub,
     onSave,
     isEdit,
 }) => {
@@ -40,6 +40,7 @@ export default ({
     const [clipNumber, setClipNumber] = useState(clipNumberOverride || 1);
     const [collections, setCollections] = useState([]);
     const [selectedCollection, setSelectedCollection] = useState('_none');
+    const [rememberAddCollection, setRememberAddCollection] = useState(false);
 
     let videoLengthMs = videoLength * 1000;
     let defaultClipSize = videoLengthMs * 0.1;
@@ -47,6 +48,28 @@ export default ({
     useEffect(() => {
         getCollections();
     }, []);
+
+    useEffect(() => {
+        (async () => {
+            const config = await ConfigAPI.getConfig();
+            setRememberAddCollection(!!config.rememberAddCollection);
+            if (config.rememberAddCollection && config.lastAddCollection?.[game]) {
+                setSelectedCollection(config.lastAddCollection[game]);
+            }
+        })();
+    }, []);
+
+    useEffect(() => {
+        if (rememberAddCollection && selectedCollection !== '_none') {
+            ConfigAPI.storeConfig({
+                lastAddCollection: {
+                    rifftrax: null,
+                    whatthedub: null,
+                    [game]: selectedCollection,
+                },
+            });
+        }
+    }, [selectedCollection]);
 
     useEffect(() => {
         if (titleOverride && clipNumberOverride) {
@@ -111,7 +134,7 @@ export default ({
                     </tr>
                     <tr>
                         <td>Collection</td>
-                        <td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
                             <select
                                 value={selectedCollection}
                                 onChange={({ target: { value } }) => {
@@ -120,14 +143,35 @@ export default ({
                                 disabled={isEdit}
                             >
                                 <option key="_none">None</option>
-                                {Object.keys(collections).map(
+                                {Object.keys(collections).sort().map(
                                     (collectionId) => (
                                         <option>{collectionId}</option>
                                     )
                                 )}
                             </select>
+                            <label style={{ fontSize: '0.8em', marginLeft: 4 }}>
+                                <input
+                                    type="checkbox"
+                                    checked={rememberAddCollection}
+                                    onChange={({ target: { checked } }) => {
+                                        setRememberAddCollection(checked);
+                                        ConfigAPI.storeConfig({ rememberAddCollection: checked });
+                                        if (checked && selectedCollection !== '_none') {
+                                            ConfigAPI.storeConfig({
+                                                lastAddCollection: {
+                                                    rifftrax: null,
+                                                    whatthedub: null,
+                                                    [game]: selectedCollection,
+                                                },
+                                            });
+                                        }
+                                    }}
+                                />
+                                Remember
+                            </label>
                         </td>
                     </tr>
+
                 </table>
                 <button
                     onClick={() => {

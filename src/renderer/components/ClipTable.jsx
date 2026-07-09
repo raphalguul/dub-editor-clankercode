@@ -1,6 +1,5 @@
 import { useAtom } from 'jotai';
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { gameAtom } from 'renderer/atoms/game.atom';
 import { interstitialAtom } from 'renderer/atoms/interstitial.atom';
@@ -34,7 +33,7 @@ export default ({
     const [searchValue, setSearchValue] = useState(null);
     const [renaming, setRenaming] = useState(null);
     const [newTitle, setNewTitle] = useState(null);
-    const [game, setGame] = useAtom(gameAtom);
+    const [game] = useAtom(gameAtom);
     const [, setInterstitialState] = useAtom(interstitialAtom);
 
     const renameClip = async () => {
@@ -137,7 +136,7 @@ export default ({
                         >
                             <option value="">All</option>
                             <option value="unsorted">Unsorted</option>
-                            {Object.keys(collections).map((name, index) => {
+                            {Object.keys(collections).sort().map((name, index) => {
                                 return (
                                     <option
                                         key={`collection-${index}`}

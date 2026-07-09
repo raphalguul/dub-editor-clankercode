@@ -1,5 +1,5 @@
-const storeBatch = async (clips, video, title) => {
-    return await window.api.send('storeBatch', { clips, video, title });
+const storeBatch = async (clips, video, title, audioTrackIndex) => {
+    return await window.api.send('storeBatch', { clips, video, title, audioTrackIndex });
 };
 
 const hasBatch = async () => {

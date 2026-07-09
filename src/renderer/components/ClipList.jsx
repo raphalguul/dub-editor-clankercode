@@ -1,5 +1,4 @@
-import CollectionAPI from 'renderer/api/CollectionAPI';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 let convertMillisecondsToTimestamp = (milliseconds) => {
@@ -32,28 +31,52 @@ export default ({
     initialTitle,
 }) => {
     const [clipTitle, setClipTitle] = useState(initialTitle || '');
+    const [blinkingClipIndex, setBlinkingClipIndex] = useState(null);
+    const blinkTimerRef = useRef(null);
     let currentClipObject = clips[currentClip];
 
     let videoLengthMs = videoLength * 1000;
-    let defaultClipSize = videoLengthMs * 0.1; // The recommended maximum length
+    let defaultClipSize = videoLengthMs * 0.1;
+
+    useEffect(() => {
+        return () => {
+            if (blinkTimerRef.current) {
+                clearTimeout(blinkTimerRef.current);
+            }
+        };
+    }, []);
+
+    const triggerBlink = (clipIndex) => {
+        setBlinkingClipIndex(clipIndex);
+        if (blinkTimerRef.current) {
+            clearTimeout(blinkTimerRef.current);
+        }
+        blinkTimerRef.current = setTimeout(() => {
+            setBlinkingClipIndex(null);
+            blinkTimerRef.current = null;
+        }, 400);
+    };
 
     return (
         <div className="subtitle-window">
             <h3>Clip Details</h3>
             <div className="video-editor">
                 <table style={{ margin: 'auto' }}>
-                    <tr>
-                        <td>Clip Name</td>
-                        <td>
-                            <input
-                                type="text"
-                                value={clipTitle}
-                                onChange={({ target: { value } }) => {
-                                    setClipTitle(value);
-                                }}
-                            />
-                        </td>
-                    </tr>
+                    <tbody>
+                        <tr>
+                            <td>Clip Name</td>
+                            <td>
+                                <input
+                                    type="text"
+                                    value={clipTitle}
+                                    onChange={({ target: { value } }) => {
+                                        setClipTitle(value);
+                                    }}
+                                />
+                            </td>
+                        </tr>
+
+                    </tbody>
                 </table>
                 <button
                     onClick={() => {
@@ -76,6 +99,8 @@ export default ({
                             <th>Index</th>
                             <th>In</th>
                             <th>Out</th>
+                            <th className="clip-lock-col"></th>
+                            <th></th>
                             <th></th>
                         </tr>
                     </thead>
@@ -83,11 +108,7 @@ export default ({
                         {clips.map((clip) => {
                             return (
                                 <tr
-                                    className={
-                                        clip.index === currentClip
-                                            ? 'selected'
-                                            : null
-                                    }
+                                    className={`${clip.index === currentClip ? 'selected' : ''} ${blinkingClipIndex === clip.index ? 'blink-red' : ''}`}
                                     style={{ cursor: 'pointer' }}
                                     onClick={() => {
                                         onSelectClip(clip.index);
@@ -104,6 +125,20 @@ export default ({
                                             clip.endTime
                                         )}
                                     </td>
+                                    <td className="clip-lock-col">
+                                        <input
+                                            type="checkbox"
+                                            checked={clip.locked || false}
+                                            title={clip.locked ? 'Unlock clip' : 'Lock clip'}
+                                            onChange={() => {
+                                                onClipsChange('edit', {
+                                                    ...clip,
+                                                    locked: !clip.locked,
+                                                }, clip.index);
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                    </td>
                                     <td>
                                         <button
                                             title="Play Clip"
@@ -118,10 +153,15 @@ export default ({
                                     <td>
                                         <button
                                             onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (clip.locked) {
+                                                    triggerBlink(clip.index);
+                                                    return;
+                                                }
                                                 onClipsChange('remove', clip);
                                                 onSelectClip(null);
-                                                e.stopPropagation();
                                             }}
+                                            className={blinkingClipIndex === clip.index ? 'blink-red' : ''}
                                         >
                                             Remove
                                         </button>
@@ -161,17 +201,24 @@ export default ({
                                 <button
                                     title="i"
                                     onClick={() => {
-                                        onClipsChange(
-                                            'edit',
-                                            {
-                                                ...currentClipObject,
-                                                startTime:
-                                                    currentSliderPosition,
-                                            },
-                                            currentClip
-                                        );
+                                        if (!currentClipObject || currentClipObject?.locked) {
+                                            onClipsChange('add', {
+                                                rowIndex: 0,
+                                                startTime: parseInt(currentSliderPosition),
+                                                endTime: Math.min(parseInt(currentSliderPosition) + defaultClipSize, videoLengthMs),
+                                            });
+                                        } else {
+                                            onClipsChange(
+                                                'edit',
+                                                {
+                                                    ...currentClipObject,
+                                                    startTime:
+                                                        currentSliderPosition,
+                                                },
+                                                currentClip
+                                            );
+                                        }
                                     }}
-                                    disabled={!currentClipObject}
                                 >
                                     Set at Play Head
                                 </button>
@@ -190,17 +237,28 @@ export default ({
                                 <button
                                     title="o"
                                     onClick={() => {
-                                        onClipsChange(
-                                            'edit',
-                                            {
-                                                ...currentClipObject,
-                                                endTime:
-                                                    currentSliderPosition,
-                                            },
-                                            currentClip
-                                        );
+                                        if (!currentClipObject || currentClipObject?.locked) {
+                                            let newStart = Math.max(0,
+                                                parseInt(currentSliderPosition) -
+                                                defaultClipSize
+                                            );
+                                            onClipsChange('add', {
+                                                rowIndex: 0,
+                                                startTime: newStart,
+                                                endTime: parseInt(currentSliderPosition),
+                                            });
+                                        } else {
+                                            onClipsChange(
+                                                'edit',
+                                                {
+                                                    ...currentClipObject,
+                                                    endTime:
+                                                        currentSliderPosition,
+                                                },
+                                                currentClip
+                                            );
+                                        }
                                     }}
-                                    disabled={!currentClipObject}
                                 >
                                     Set at Play Head
                                 </button>
@@ -217,6 +275,27 @@ export default ({
                                               currentClipObject.startTime
                                       )
                                     : ''}
+                            </td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <label>Locked</label>
+                            </td>
+                            <td>
+                                <input
+                                    type="checkbox"
+                                    checked={currentClipObject?.locked || false}
+                                    disabled={!currentClipObject}
+                                    title={currentClipObject?.locked ? 'Unlock clip' : 'Lock clip'}
+                                    onChange={() => {
+                                        if (!currentClipObject) return;
+                                        onClipsChange('edit', {
+                                            ...currentClipObject,
+                                            locked: !currentClipObject.locked,
+                                        }, currentClip);
+                                    }}
+                                />
                             </td>
                             <td></td>
                         </tr>

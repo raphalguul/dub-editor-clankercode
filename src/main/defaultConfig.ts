@@ -10,6 +10,11 @@ type Config = {
         whatthedub: string | null;
     };
     rememberCollection: boolean;
+    rememberAddCollection: boolean;
+    lastAddCollection: {
+        rifftrax: string | null;
+        whatthedub: string | null;
+    };
     fixSubsOnLoad: boolean;
     checkSpeakersOnFinalize: boolean;
     audioNormalizeOnFinalize: boolean;
@@ -23,6 +28,7 @@ type Config = {
     whisperUseCuda: boolean;
     whisperCudaFallbackCpu: boolean;
     whisperSuppressSilence: boolean;
+    autoIncrementClipNumber: boolean;
 };
 
 const defaultConfig: Config = {
@@ -37,6 +43,11 @@ const defaultConfig: Config = {
         whatthedub: null,
     },
     rememberCollection: true,
+    rememberAddCollection: false,
+    lastAddCollection: {
+        rifftrax: null,
+        whatthedub: null,
+    },
     fixSubsOnLoad: true,
     checkSpeakersOnFinalize: true,
     audioNormalizeOnFinalize: true,
@@ -50,6 +61,7 @@ const defaultConfig: Config = {
     whisperUseCuda: true,
     whisperCudaFallbackCpu: true,
     whisperSuppressSilence: true,
+    autoIncrementClipNumber: true,
 };
 
 export default defaultConfig;

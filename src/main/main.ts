@@ -10,17 +10,24 @@
  */
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
+import os from 'os';
+import { execSync } from 'child_process';
 import { app, BrowserWindow, dialog, shell, ipcMain, protocol } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 
+function fromLocalfileUrl(url: string): string {
+    return decodeURIComponent(url.replace(/^localfile:\/{2,}/, '').replace(/^[\/\\]/, ''));
+}
+
 import defaultConfig from './defaultConfig';
 import JSZip from 'jszip';
 import { ClipPaths, DirectoryList } from './types';
 import * as whisper from './whisper';
-import { isCompatible, convertToCompatible } from './videoFormat';
+import { isCompatible, convertToCompatible, probeMediaInfo } from './videoFormat';
 
 const ffmpeg = require('fluent-ffmpeg');
 const StreamZip = require('node-stream-zip');
@@ -83,6 +90,81 @@ const defaultBatchCache : any = {
 }
 let batchCache : any = defaultBatchCache;
 
+const CACHE_DIR = path.join(os.tmpdir(), 'dub-editor-cache');
+const CACHE_MAX_AGE = 24 * 60 * 60 * 1000;
+
+try {
+    if (fs.existsSync(CACHE_DIR)) {
+        const now = Date.now();
+        fs.readdirSync(CACHE_DIR).forEach(file => {
+            const filePath = path.join(CACHE_DIR, file);
+            try {
+                const stat = fs.statSync(filePath);
+                if (now - stat.mtimeMs > CACHE_MAX_AGE) { fs.unlinkSync(filePath); }
+            } catch {}
+        });
+    }
+} catch (err) {
+    log.error('Cache cleanup error: ' + err);
+}
+
+try {
+    const tmpDir = os.tmpdir();
+    const oldPlaybackDirs = fs.readdirSync(tmpDir)
+        .filter(d => d.startsWith('dub-editor-playback-'))
+        .map(d => path.join(tmpDir, d));
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    for (const dir of oldPlaybackDirs) {
+        try {
+            if (fs.statSync(dir).mtimeMs < oneHourAgo) { fs.rmSync(dir, { recursive: true, force: true }); }
+        } catch {}
+    }
+} catch (err) {
+    log.error('Playback temp cleanup error: ' + err);
+}
+
+let detectedEncoder: string | null = null;
+
+function getEncoder(): Promise<string> {
+    return new Promise((resolve) => {
+        if (detectedEncoder) { resolve(detectedEncoder); return; }
+        ffmpeg.getAvailableEncoders((err: any, encoders: any) => {
+            if (err) { detectedEncoder = 'libx264'; resolve(detectedEncoder); return; }
+            if (encoders['h264_nvenc']?.canEncode) detectedEncoder = 'h264_nvenc';
+            else if (encoders['h264_amf']?.canEncode) detectedEncoder = 'h264_amf';
+            else if (encoders['h264_qsv']?.canEncode) detectedEncoder = 'h264_qsv';
+            if (!detectedEncoder) {
+                try {
+                    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+                    const systemFfmpeg = execSync(`${whichCmd} ffmpeg`, { encoding: 'utf8' }).split(/\r?\n/)[0]?.trim();
+                    if (systemFfmpeg) {
+                        const output = execSync(`"${systemFfmpeg}" -hide_banner -encoders`, { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+                        if (output.includes('h264_nvenc')) detectedEncoder = 'h264_nvenc';
+                        else if (output.includes('h264_amf')) detectedEncoder = 'h264_amf';
+                        else if (output.includes('h264_qsv')) detectedEncoder = 'h264_qsv';
+                        if (detectedEncoder) {
+                            log.info('Switching to system ffmpeg with ' + detectedEncoder + ': ' + systemFfmpeg);
+                            ffmpeg.setFfmpegPath(systemFfmpeg);
+                        }
+                    }
+                } catch (e) { log.info('System ffmpeg not available or lacks HW encoders'); }
+            }
+            if (!detectedEncoder) detectedEncoder = 'libx264';
+            log.info('Using video encoder: ' + detectedEncoder);
+            resolve(detectedEncoder);
+        });
+    });
+}
+
+function getCacheKey(filePath: string, trackIndex: number): string {
+    try {
+        const stat = fs.statSync(filePath);
+        return crypto.createHash('md5').update(`${filePath}|${trackIndex}|${stat.mtimeMs}`).digest('hex');
+    } catch {
+        return crypto.createHash('md5').update(`${filePath}|${trackIndex}`).digest('hex');
+    }
+}
+
 const defaultCollections: any = {
     whatthedub: {},
     rifftrax: {},
@@ -112,33 +194,36 @@ const createMediaFolders = (game: string) => {
     fs.mkdirSync(logFile, {recursive: true});
 }
 
-const processVideo = (inputFilePath: string, outputFilePath: string, startTime: number, duration: number) => {
+const processVideo = (inputFilePath: string, outputFilePath: string, startTime: number, duration: number, audioTrackIndex?: number) => {
     return new Promise((resolve, reject) => {
         log.info("PROCESSING " + inputFilePath);
         log.info("STORING TO " + outputFilePath);
-        // Process video
         const ts = convertMillisecondsToTimestamp(startTime);
-        ffmpeg(inputFilePath)
+        let cmd = ffmpeg(inputFilePath)
             .videoCodec("libx264")
             .audioCodec("aac")
             .audioBitrate("192k")
+            .audioChannels(2)
             .setStartTime(ts)
-            .setDuration(duration / 1000)
-            .output(outputFilePath)
+            .setDuration(duration / 1000);
+
+        const outputOpts: string[] = [];
+        if (audioTrackIndex !== undefined) {
+            outputOpts.push('-map', '0:v:0', '-map', `0:${audioTrackIndex}`);
+        }
+        if (outputOpts.length > 0) { cmd = cmd.outputOptions(outputOpts); }
+
+        cmd.output(outputFilePath)
             .on('end', function(err: any) {
-                if(!err) { 
-                    resolve(0);
-                }
+                if(!err) { resolve(0); }
             })
-            .on('error', function(err: any){
-                reject(err);
-            }).run();
+            .on('error', function(err: any){ reject(err); }).run();
     });
 }
 
-const trimAndWriteVideo = async (inputFilePath: string, outputFilePath: string, startTime: number, endTime: number) => {
+const trimAndWriteVideo = async (inputFilePath: string, outputFilePath: string, startTime: number, endTime: number, audioTrackIndex?: number) => {
     try {
-        await processVideo(inputFilePath, outputFilePath, startTime, endTime - startTime);
+        await processVideo(inputFilePath, outputFilePath, startTime, endTime - startTime, audioTrackIndex);
     } catch (err) {
         log.error("Unable to trim video: " + err);
         throw new Error("Unable to trim video: " + err);
@@ -168,7 +253,7 @@ const createThumbnail = async (videoFilePath: string, thumbnailTime: string, thu
 
 const NORMALIZED_MARKER_SUFFIX = '.normalized';
 
-const normalizeVideo = async (videoPath: string, cfg: any): Promise<boolean> => {
+const normalizeVideo = async (videoPath: string, cfg: any, audioTrackIndex?: number): Promise<boolean> => {
     const markerPath = videoPath + NORMALIZED_MARKER_SUFFIX;
 
     if (fs.existsSync(markerPath)) {
@@ -211,10 +296,17 @@ const normalizeVideo = async (videoPath: string, cfg: any): Promise<boolean> => 
 
             const runNormalize = (filterChain: string[]) => {
                 attempt++;
-                const cmd = ffmpeg(videoPath)
+                let cmd = ffmpeg(videoPath)
                     .videoCodec('copy')
                     .audioCodec('aac')
-                    .audioBitrate('192k');
+                    .audioBitrate('192k')
+                    .audioChannels(2);
+
+                const normOpts: string[] = [];
+                if (audioTrackIndex !== undefined) {
+                    normOpts.push('-map', '0:v:0', '-map', `0:${audioTrackIndex}`);
+                }
+                if (normOpts.length > 0) { cmd = cmd.outputOptions(normOpts); }
 
                 if (filterChain.length > 0) {
                     cmd.audioFilters(filterChain.join(','));
@@ -240,6 +332,7 @@ const normalizeVideo = async (videoPath: string, cfg: any): Promise<boolean> => 
                             resolve(true);
                         } catch (err) {
                             log.error('Normalize swap failed: ' + err);
+                            try { fs.unlinkSync(tmpOutput); } catch {}
                             resolve(false);
                         }
                     })
@@ -738,6 +831,8 @@ const createWindow = async () => {
         height: 1080,
         icon: getAssetPath('icon.png'),
         webPreferences: {
+            sandbox: false,
+            contextIsolation: true,
             preload: app.isPackaged
                 ? path.join(__dirname, 'preload.js')
                 : path.join(__dirname, '../../.erb/dll/preload.js'),
@@ -778,81 +873,155 @@ const createWindow = async () => {
     });
 
     protocol.interceptFileProtocol('localfile', (request, callback) => {
-        const filePath = decodeURIComponent(request.url.substring('localfile://'.length));
-        
-        log.info("FILE PATH: " + filePath);
-
+        const filePath = decodeURIComponent(request.url.replace(/^localfile:\/{2,}/, ''));
+        log.info("OLD localfile: " + filePath);
         callback(filePath);
     });
 
     protocol.interceptFileProtocol('game', async (request, callback) => {
         const url = request.url.substring('game://'.length);
         const pattern = /^(rifftrax|whatthedub)\/(.+)\.(mp4|srt|jpg)$/;
-
         const match : any = url.match(pattern);
-
-        if (!match) {
-            return null;
-        }
-
+        if (!match) { return null; }
         const game = match[1];
-        const id = match[2];
+        const id = decodeURIComponent(match[2]);
         const ext = match[3];
-
         const {clip, subtitle, thumbnail} = getClipPaths(id, game);
-
         try {
-            if (ext === 'mp4') {
-                callback(clip);
-            } else if (ext === 'srt') {
-                callback(subtitle);
-            } else if (ext === 'jpg') {
+            if (ext === 'mp4') { callback(clip); }
+            else if (ext === 'srt') { callback(subtitle); }
+            else if (ext === 'jpg') {
                 if (!fs.existsSync(thumbnail) && fs.existsSync(clip)) {
                     await createThumbnail(clip, '00:00:01', thumbnail);
                 }
                 callback(thumbnail);
-            } else {
-                callback(clip);
-            }
-        } catch (error) {
-            log.warn("Cannot fetch file " + id + "." + ext);
-        }
+            } else { callback(clip); }
+        } catch (error) { log.warn("Cannot fetch file " + id + "." + ext); }
         return;
     });
 };
 
-createMediaFolders('rifftrax');
-createMediaFolders('whatthedub');
+const MIME_TYPES: Record<string, string> = {
+    mp4: 'video/mp4', mkv: 'video/x-matroska', webm: 'video/webm',
+    mov: 'video/quicktime', avi: 'video/x-msvideo',
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    srt: 'text/plain', vtt: 'text/vtt',
+};
 
-/**
- * Add event listeners...
- */
+const MAX_CHUNK = 4 * 1024 * 1024;
 
-app.on('window-all-closed', () => {
-    // Respect the OSX convention of having the application in memory even
-    // after all windows have been closed
-    if (process.platform !== 'darwin') {
-        app.quit();
+function serveFile(filePath: string, mime: string, rangeHeader: string | null): Response {
+    log.info('SERVE: ' + filePath + ' mime=' + mime + ' range=' + (rangeHeader || 'none'));
+    if (!fs.existsSync(filePath)) {
+        log.warn('SERVE not found: ' + filePath);
+        return new Response('Not found', { status: 404 });
     }
-});
-
-app.on('render-process-gone', (_event, _webContents, details) => {
-    log.error(`Render process gone (reason: ${details.reason}, exitCode: ${details.exitCode})`);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.reload();
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    if (rangeHeader) {
+        const match = rangeHeader.replace(/bytes=/, '').match(/(\d*)-(\d*)/);
+        if (match) {
+            let start = parseInt(match[1], 10);
+            let end = parseInt(match[2], 10);
+            if (isNaN(start)) { start = Math.max(0, fileSize + start); end = fileSize - 1; }
+            else { if (isNaN(end) || end >= fileSize) end = Math.min(fileSize - 1, start + MAX_CHUNK - 1); }
+            const chunkSize = end - start + 1;
+            const data = fs.readFileSync(filePath, { start, end });
+            return new Response(data, {
+                status: 206,
+                headers: {
+                    'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                    'Content-Type': mime,
+                    'Content-Length': String(chunkSize),
+                    'Accept-Ranges': 'bytes',
+                }
+            });
+        }
     }
-});
+    const data = fs.readFileSync(filePath);
+    return new Response(data, {
+        status: 200,
+        headers: {
+            'Content-Type': mime,
+            'Content-Length': String(fileSize),
+            'Accept-Ranges': 'bytes',
+        }
+    });
+}
+
+protocol.registerSchemesAsPrivileged([
+    { scheme: 'localfile', privileges: { secure: true, bypassCSP: true, corsEnabled: true, stream: true, supportFetchAPI: true } },
+    { scheme: 'game', privileges: { standard: true, secure: true, bypassCSP: true, corsEnabled: true, stream: true, supportFetchAPI: true } },
+]);
+
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,MojoMediaAudioDecoder,PlatformAudioDecoder');
 
 app.whenReady()
     .then(() => {
+        protocol.handle('localfile', async (request) => {
+            const rawPath = request.url.substring('localfile:///'.length);
+            const filePath = decodeURIComponent(rawPath.startsWith('/') ? rawPath.substring(1) : rawPath);
+            log.info("NEW localfile: " + filePath);
+            try {
+                const ext = path.extname(filePath).replace('.', '').toLowerCase();
+                const mime = MIME_TYPES[ext] || 'application/octet-stream';
+                return serveFile(filePath, mime, request.headers.get('Range'));
+            } catch (err) {
+                log.error('localfile handler error: ' + err);
+                return new Response('Not found', { status: 404 });
+            }
+        });
+        protocol.handle('game', async (request) => {
+            log.info('NEW game: ' + request.url);
+            const url = request.url.substring('game://'.length);
+            log.info('GAME afterPrefix: ' + url);
+            const pattern = /^(rifftrax|whatthedub)\/(.+)\.(mp4|srt|jpg)$/;
+            const match : any = url.match(pattern);
+            if (!match) { log.warn('GAME no match'); return new Response('Not found', { status: 404 }); }
+            const game = match[1];
+            const id = decodeURIComponent(match[2]);
+            const ext = match[3];
+            log.info('GAME parsed: game=' + game + ' id=' + id + ' ext=' + ext);
+            const {clip, subtitle, thumbnail} = getClipPaths(id, game);
+            log.info('GAME paths: clip=' + clip);
+            try {
+                let filePath;
+                if (ext === 'mp4') { filePath = clip; }
+                else if (ext === 'srt') { filePath = subtitle; }
+                else if (ext === 'jpg') {
+                    if (!fs.existsSync(thumbnail) && fs.existsSync(clip)) {
+                        await createThumbnail(clip, '00:00:01', thumbnail);
+                    }
+                    filePath = thumbnail;
+                } else { filePath = clip; }
+                log.info('GAME resolved: ' + filePath + ' exists=' + fs.existsSync(filePath));
+                const mime = MIME_TYPES[ext] || 'application/octet-stream';
+                const result = serveFile(filePath, mime, request.headers.get('Range'));
+                log.info('GAME returning response for ext=' + ext);
+                return result;
+            } catch (error) {
+                log.warn("GAME error: " + id + "." + ext + " " + error);
+                return new Response('Not found', { status: 404 });
+            }
+        });
         createWindow();
         app.on('activate', () => {
-            // On macOS it's common to re-create a window in the app when the
-            // dock icon is clicked and there are no other windows open.
             if (mainWindow === null) createWindow();
         });
     })
     .catch(log.error);
+
+createMediaFolders('rifftrax');
+createMediaFolders('whatthedub');
+
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') { app.quit(); }
+});
+
+app.on('render-process-gone', (_event, _webContents, details) => {
+    log.error(`Render process gone (reason: ${details.reason}, exitCode: ${details.exitCode})`);
+    if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.reload(); }
+});
 
 // Bridged functionality
 
@@ -869,6 +1038,18 @@ ipcMain.handle('clipExists', (event, { title, clipNumber, game }) => {
         fs.existsSync(videoFilePath);
 
     return exists;
+});
+
+ipcMain.handle('findAvailableClipNumber', (event, { title, startNumber, game }) => {
+    const MAX_ITERATIONS = 10000;
+    for (let i = startNumber; i < startNumber + MAX_ITERATIONS; i++) {
+        const id = createClipName(title, i);
+        const {clip: videoFilePath} = getClipPaths(id, game);
+        if (!fs.existsSync(videoFilePath)) {
+            return i;
+        }
+    }
+    return null;
 });
 
 ipcMain.handle('updateConfig', (event, newConfig) => {
@@ -888,12 +1069,13 @@ ipcMain.handle('getConfig', () => {
     return config;
 });
 
-ipcMain.handle('storeBatch', async (event, { clips, video, title }) => {
+ipcMain.handle('storeBatch', async (event, { clips, video, title, audioTrackIndex }) => {
     batchCache = {
         video,
         title,
         clipNumber: 1,
         clips,
+        audioTrackIndex,
     };
 
     const {batchCacheMeta} = getConfigDirectories();
@@ -905,24 +1087,22 @@ ipcMain.handle('storeBatch', async (event, { clips, video, title }) => {
     );
 });
 
-ipcMain.handle('hasBatch', (event) => {
+ipcMain.handle('hasBatch', (_event) => {
     return batchCache.clips.length;
 });
 
-ipcMain.handle('nextBatchClip', (event) => {
+ipcMain.handle('nextBatchClip', (_event) => {
     return {
         title: batchCache.title,
         clipNumber: batchCache.clipNumber,
         clip: batchCache.clips[0],
-        video: batchCache.video
+        video: batchCache.video,
+        audioTrackIndex: batchCache.audioTrackIndex,
     };
 });
 
-ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtitleObjects, title, clipNumber, game}) => {
-    log.info(
-        `STORING ${title}-${clipNumber} for game ${game} with subtitles ${subtitles}`
-    );
-
+ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtitleObjects, title, clipNumber, game, audioTrackIndex}) => {
+    log.info(`STORING ${title}-${clipNumber} for game ${game} with subtitles ${subtitles}`);
     log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
     const {batchCacheMeta} = getConfigDirectories();
@@ -933,17 +1113,14 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
         const id = createClipName(title, clipNumber);
         const {clip: videoFilePath, subtitle: subFilePath} = getClipPaths(id, game);
 
-        // Write video clip
-        await trimAndWriteVideo(videoSource.replace("localfile://", ""), videoFilePath, clip.startTime, clip.endTime);
+        await trimAndWriteVideo(fromLocalfileUrl(videoSource), videoFilePath, clip.startTime, clip.endTime, audioTrackIndex);
 
-        // Invalidate normalization marker since video was re-created
         try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
 
-        // Write matching subtitles
         fs.writeFileSync(subFilePath, subtitles);
 
         if (config.audioNormalizeOnFinalize) {
-            normalizeVideo(videoFilePath, config);
+            normalizeVideo(videoFilePath, config, audioTrackIndex);
         }
 
         // Remove the clip from batch on completion
@@ -960,7 +1137,7 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
     }
 });
 
-ipcMain.handle('clearBatchCache', (event) => {
+ipcMain.handle('clearBatchCache', (_event) => {
     batchCache = {
         clips: [],
         video: null,
@@ -997,16 +1174,16 @@ ipcMain.handle('getVideo', (event, { id, game }) => {
 
     const {clip: videoFilePath, subtitle: subFilePath} = getClipPaths(id, game);
 
-    const videoBase64: string = fs.readFileSync(videoFilePath, {
-        encoding: 'base64',
-    });
     const subtitles: string = fs.readFileSync(subFilePath, {
         encoding: 'base64',
     });
 
+    const videoUrl = `localfile:///${videoFilePath.replace(/\\/g, '/')}`;
+    log.info('GETVIDEO url=' + videoUrl + ' exists=' + fs.existsSync(videoFilePath));
+
     return {
         name: id.replace(/_/g, ' '),
-        videoUrl: `data:video/mp4;base64,${videoBase64}`,
+        videoUrl,
         subtitles: [],
         srtBase64: subtitles,
     };
@@ -1067,45 +1244,56 @@ ipcMain.handle(
 
 ipcMain.handle(
     'storeVideo',
-    async (event, { videoSource, subtitles, subtitleObjects, title, clipNumber, game }) => {
-        log.info(
-            `STORING ${title}-${clipNumber} for game ${game} with subtitles \n${subtitles}`
-        );
-
+    async (event, { videoSource, subtitles, subtitleObjects, title, clipNumber, game, audioTrackIndex }) => {
+        log.info(`STORING ${title}-${clipNumber} for game ${game} with subtitles \n${subtitles}`);
         log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
         const id = createClipName(title, clipNumber);
         const {clip: videoFilePath, subtitle: subFilePath, thumbnail: thumbNailPath} = getClipPaths(id, game);
 
-        // Only store file if it's not already here.
         if (videoSource.startsWith("localfile://")) {
             log.info('SAVING VIDEO TO ' + videoFilePath + '\n' + subFilePath);
 
-            const sourcePath = videoSource.replace("localfile://", "");
+            const sourcePath = fromLocalfileUrl(videoSource);
 
-            const compatible = await isCompatible(sourcePath);
-            if (!compatible) {
-                log.info('Source video is not compatible, converting...');
-                const tmpPath = videoFilePath + '.converting.mp4';
-                await convertToCompatible(sourcePath, tmpPath);
-                fs.copyFileSync(tmpPath, videoFilePath);
-                try { fs.unlinkSync(tmpPath); } catch {}
+            const isSelfCopy = path.resolve(sourcePath) === path.resolve(videoFilePath);
+
+            if (!isSelfCopy) {
+                if (audioTrackIndex !== undefined) {
+                    log.info('Using audio track index: ' + audioTrackIndex + ' (stream copy)');
+                    await new Promise((resolve, reject) => {
+                        ffmpeg(sourcePath)
+                            .videoCodec('copy').audioCodec('copy')
+                            .outputOptions(['-map', '0:v:0', '-map', '0:' + audioTrackIndex])
+                            .output(videoFilePath)
+                            .on('end', resolve)
+                            .on('error', (err) => { log.error('Stream copy failed: ' + err); reject(err); })
+                            .run();
+                    });
+                } else {
+                    const compatible = await isCompatible(sourcePath);
+                    if (!compatible) {
+                        log.info('Source video is not compatible, converting...');
+                        const tmpPath = videoFilePath + '.converting.mp4';
+                        await convertToCompatible(sourcePath, tmpPath);
+                        fs.copyFileSync(tmpPath, videoFilePath);
+                        try { fs.unlinkSync(tmpPath); } catch {}
+                    } else {
+                        fs.copyFileSync(sourcePath, videoFilePath);
+                    }
+                }
+                try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
             } else {
-                fs.copyFileSync(sourcePath, videoFilePath);
+                log.info('Source is same as destination, skipping video copy');
             }
 
-            // Invalidate normalization marker since video was re-created
-            try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
-
-            // Create a thumbnail
-            const thumbnailTime = '00:00:01';
-            createThumbnail(videoFilePath, thumbnailTime, thumbNailPath);
+            await createThumbnail(videoFilePath, '00:00:01', thumbNailPath);
         }
         log.info('SAVING SUBS TO ' + subFilePath);
         fs.writeFileSync(subFilePath, subtitles);
 
         if (config.audioNormalizeOnFinalize) {
-            normalizeVideo(videoFilePath, config);
+            await normalizeVideo(videoFilePath, config, audioTrackIndex);
         }
 
         return id;
@@ -1320,9 +1508,7 @@ ipcMain.handle('openImageFile', async () => {
     }
 });
 
-ipcMain.handle('setActive', async (event) => {
 
-});
 
 ipcMain.handle('showConfirmDialog', async (event, { message }) => {
     const result = await dialog.showMessageBox(mainWindow!, {
@@ -1335,7 +1521,7 @@ ipcMain.handle('showConfirmDialog', async (event, { message }) => {
     return result.response !== 0;
 });
 
-ipcMain.handle('importZip', async (event, game) => {
+ipcMain.handle('importZip', async (_event, game) => {
     log.info('IMPORTING ZIP');
     const response = await dialog.showOpenDialog({
         properties: ['openFile'],
@@ -1348,7 +1534,7 @@ ipcMain.handle('importZip', async (event, game) => {
     return collections[game];
 });
 
-ipcMain.handle('normalizeAudio', async (event, { videoPath, game }) => {
+ipcMain.handle('normalizeAudio', async (event, { videoPath }) => {
     if (!fs.existsSync(videoPath)) {
         throw new Error('Video file not found');
     }
@@ -1382,25 +1568,21 @@ ipcMain.handle('normalizeCollection', async (event, { collectionId, game }) => {
     return { processed, skipped, total: videoIds.length };
 });
 
-ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConfig, startTime, endTime }) => {
+ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConfig, startTime, endTime, audioTrackIndex }) => {
     let resolvedPath = videoPath;
 
     if (resolvedPath.startsWith('game://')) {
         const url = resolvedPath.substring('game://'.length);
         const pattern = /^(rifftrax|whatthedub)\/(.+)\.(mp4|srt|jpg)$/;
         const match = url.match(pattern);
-        if (!match) {
-            throw new Error('Video file not found');
-        }
+        if (!match) { throw new Error('Video file not found'); }
         const { clip } = getClipPaths(match[2], match[1]);
         resolvedPath = clip;
     } else if (resolvedPath.startsWith('localfile://')) {
-        resolvedPath = decodeURIComponent(resolvedPath.substring('localfile://'.length));
+        resolvedPath = fromLocalfileUrl(resolvedPath);
     }
 
-    if (!fs.existsSync(resolvedPath)) {
-        throw new Error('Video file not found');
-    }
+    if (!fs.existsSync(resolvedPath)) { throw new Error('Video file not found'); }
 
     let startSec: number | undefined;
     let durSec: number | undefined;
@@ -1410,22 +1592,133 @@ ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConf
     }
 
     const results = await whisper.transcribe(
-        resolvedPath,
-        whisperConfig,
-        (msg: string) => {
-            log.info('[whisper] ' + msg);
-            mainWindow?.webContents.send('whisper:progress', msg, -1);
-        },
-        (pct: number) => {
-            log.info('[whisper] Progress: ' + pct + '%');
-            mainWindow?.webContents.send('whisper:progress', '', pct);
-        },
-        startSec,
-        durSec
+        resolvedPath, whisperConfig,
+        (msg: string) => { log.info('[whisper] ' + msg); mainWindow?.webContents.send('whisper:progress', msg, -1); },
+        (pct: number) => { log.info('[whisper] Progress: ' + pct + '%'); mainWindow?.webContents.send('whisper:progress', '', pct); },
+        startSec, durSec, audioTrackIndex
     );
 
     return { results };
 });
 
-ipcMain.handle('disableVideos', async (event) => {
+ipcMain.handle('log', (event, msg) => {
+    log.info('[r] ' + msg);
+});
+
+ipcMain.handle('showAudioTrackPrompt', async (event, { tracks }) => {
+    const detail = tracks.map((t, i) =>
+        `Track ${i + 1}: ${t.codec?.toUpperCase() || 'Unknown'} ${t.channels}ch${t.language ? `, ${t.language}` : ''}${t.title ? ` - ${t.title}` : ''}`
+    ).join('\n');
+    const buttons = tracks.map((_t, i) => `Track ${i + 1}`);
+    buttons.push('Cancel');
+    const result = await dialog.showMessageBox(mainWindow!, {
+        type: 'question', buttons, defaultId: 0, cancelId: buttons.length - 1,
+        message: 'Multiple audio tracks detected. Select the track to use:', detail,
+    });
+    if (result.response === buttons.length - 1) return -1;
+    return tracks[result.response].index;
+});
+
+ipcMain.handle('getAudioTracks', async (event, videoSource) => {
+    let resolvedPath = videoSource;
+    if (resolvedPath.startsWith('localfile://')) { resolvedPath = fromLocalfileUrl(resolvedPath); }
+    if (!fs.existsSync(resolvedPath)) { log.warn('PROBE not found: ' + resolvedPath); return { tracks: [], videoCodec: null, videoPixFmt: null }; }
+    const info = await probeMediaInfo(resolvedPath);
+    log.info('PROBE: ' + info.videoCodec + '/' + info.videoPixFmt + ' ' + info.tracks.length + 'tracks');
+    return info;
+});
+
+ipcMain.handle('remuxForPlayback', async (event, { videoSource, audioTrackIndex }) => {
+    let resolvedPath = videoSource;
+    if (resolvedPath.startsWith('localfile://')) { resolvedPath = fromLocalfileUrl(resolvedPath); }
+    if (!fs.existsSync(resolvedPath)) { throw new Error('Video file not found'); }
+    const cacheKey = getCacheKey(resolvedPath, audioTrackIndex);
+    const cachedFile = path.join(CACHE_DIR, cacheKey + '.mp4');
+    if (fs.existsSync(cachedFile)) {
+        try {
+            const fd = fs.openSync(cachedFile, 'r');
+            const buf = Buffer.alloc(8);
+            fs.readSync(fd, buf, 0, 8, 4);
+            fs.closeSync(fd);
+            if (buf.readUInt32BE(0) === 0x66747970) {
+                log.info('Cache hit for ' + resolvedPath + ' track ' + audioTrackIndex);
+                return `localfile:///${cachedFile.replace(/\\/g, '/')}`;
+            }
+        } catch {}
+        log.warn('Cache file invalid, re-remuxing: ' + cachedFile);
+        try { fs.unlinkSync(cachedFile); } catch {}
+    }
+    const probeData = await probeMediaInfo(resolvedPath).catch(() => ({ tracks: [], videoCodec: '', videoPixFmt: '', duration: 0 }));
+    const audioTrack = probeData.tracks.find(t => t.index === audioTrackIndex) || probeData.tracks[0] || {};
+    const audioCodec = audioTrack.codec || '';
+    const audioChannels = audioTrack.channels || 0;
+    const compatibleAudioCodecs = ['aac', 'mp3', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le', 'opus', 'flac'];
+    const needAudioReencode = !compatibleAudioCodecs.includes(audioCodec);
+    const compatibleVideoCodecs = ['h264', 'hevc', 'vp8', 'vp9', 'av1'];
+    const isH264_8bit = probeData.videoCodec === 'h264' && (probeData.videoPixFmt === 'yuv420p' || probeData.videoPixFmt === 'yuvj420p');
+    const needVideoReencode = !compatibleVideoCodecs.includes(probeData.videoCodec) || (probeData.videoCodec === 'h264' && !isH264_8bit);
+    log.info('REMUX DECISION: vcodec=' + probeData.videoCodec + ' pix=' + probeData.videoPixFmt + ' audio=' + audioCodec + ' video=' + (needVideoReencode ? 'reencode' : 'copy') + ' audio=' + (needAudioReencode ? 'reencode' : 'copy'));
+    if (!fs.existsSync(CACHE_DIR)) { fs.mkdirSync(CACHE_DIR, { recursive: true }); }
+    const convPath = cachedFile + '.conv';
+    log.info('Remuxing for playback: track ' + audioTrackIndex + ' from ' + resolvedPath
+        + (needVideoReencode ? ' (re-encoding video)' : ' (copying video)')
+        + (needAudioReencode ? ' (re-encoding audio to FLAC)' : ' (copying audio)'));
+    const encoder = needVideoReencode ? await getEncoder() : null;
+    const effectiveEncoder = encoder;
+
+    function parseTimemark(tm: string): number {
+        const parts = tm.split(':');
+        if (parts.length === 3) { return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]); }
+        return 0;
+    }
+
+    return new Promise((resolve, reject) => {
+        let lastReportedPct = -1;
+        let command = ffmpeg(resolvedPath);
+        if (effectiveEncoder === 'h264_nvenc') { command = command.inputOptions(['-hwaccel', 'd3d11va']); }
+        else if (effectiveEncoder === 'h264_amf') { command = command.inputOptions(['-hwaccel', 'd3d11va']); }
+        else if (effectiveEncoder === 'h264_qsv') { command = command.inputOptions(['-hwaccel', 'qsv']); }
+        command = command
+            .outputOptions(['-map', '0:v:0', '-map', `0:${audioTrackIndex}`, '-f', 'mp4', '-movflags', '+faststart'])
+            .output(convPath)
+            .on('progress', (info: any) => {
+                let pct = 0;
+                if (info.percent !== undefined && info.percent !== null) { pct = Math.round(info.percent); }
+                else if (probeData.duration > 0 && info.timemark) { pct = Math.min(99, Math.round((parseTimemark(info.timemark) / probeData.duration) * 100)); }
+                if (pct !== lastReportedPct) { lastReportedPct = pct; try { event.sender.send('remuxProgress', pct); } catch (_) {} }
+            })
+            .on('end', () => {
+                try { fs.renameSync(convPath, cachedFile); } catch (e) { log.error('Failed to rename conv file: ' + e); }
+                log.info('Remux complete: ' + cachedFile);
+                try { event.sender.send('remuxProgress', 100); } catch (_) {}
+                resolve(`localfile:///${cachedFile.replace(/\\/g, '/')}`);
+            })
+            .on('error', (err: any, _stdout: string, stderr: string) => {
+                try { fs.unlinkSync(convPath); } catch {}
+                const errMsg = stderr || String(err);
+                log.error('Remux for playback failed');
+                log.error('FFmpeg stderr: ' + errMsg.slice(-10000));
+                reject(new Error(errMsg.slice(-500)));
+            });
+        if (needVideoReencode) {
+            if (effectiveEncoder === 'h264_nvenc') { command = command.videoCodec('h264_nvenc').outputOptions(['-preset', 'p1', '-cq', '23']); }
+            else if (effectiveEncoder === 'h264_amf') { command = command.videoCodec('h264_amf').outputOptions(['-quality', 'speed', '-qp_i', '23', '-qp_p', '23']); }
+            else if (effectiveEncoder === 'h264_qsv') { command = command.videoCodec('h264_qsv').outputOptions(['-preset', 'veryfast', '-global_quality', '23']); }
+            else { command = command.videoCodec('libx264').outputOptions(['-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-crf', '27']); }
+        } else { command = command.videoCodec('copy'); }
+        if (needAudioReencode) {
+            command = command.audioCodec('flac');
+            if (audioChannels > 6) { command = command.audioChannels(6); }
+        } else { command = command.audioCodec('copy'); }
+        command.run();
+    });
+});
+
+ipcMain.handle('cleanupTempFile', async (event, tempPath) => {
+    let resolvedPath = tempPath;
+    if (resolvedPath.startsWith('localfile://')) { resolvedPath = fromLocalfileUrl(resolvedPath); }
+    try {
+        const dir = path.dirname(resolvedPath);
+        if (fs.existsSync(dir) && dir.includes('dub-editor-playback-')) { fs.rmSync(dir, { recursive: true, force: true }); }
+    } catch (err) { log.error('Failed to cleanup temp file: ' + err); }
 });

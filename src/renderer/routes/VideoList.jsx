@@ -1,24 +1,18 @@
 import { useAtom } from 'jotai';
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { toast } from 'react-toastify';
+import { Link, useNavigate } from 'react-router-dom';
 import BatchAPI from 'renderer/api/BatchAPI';
 import ConfigAPI from 'renderer/api/ConfigAPI';
 import { gameAtom } from 'renderer/atoms/game.atom';
-import { interstitialAtom } from 'renderer/atoms/interstitial.atom';
 import ClipTable from 'renderer/components/ClipTable';
-import Interstitial, {
-    handleInterstitial,
-} from 'renderer/components/interstitial/Interstitial';
+import Interstitial from 'renderer/components/interstitial/Interstitial';
 
 let VideoList = () => {
     const [videoMap, setVideoMap] = useState({});
     const [batchCount, setBatchCount] = useState(0);
     const [collectionMap, setCollectionMap] = useState({});
     const [config, setConfig] = useState({});
-    const [searchValue, setSearchValue] = useState(null);
     const [game] = useAtom(gameAtom);
-    const [, setInterstitialState] = useAtom(interstitialAtom);
     const navigate = useNavigate();
 
     const videos = videoMap[game];
@@ -69,20 +63,6 @@ let VideoList = () => {
     if (!videos || !collections) {
         return <Interstitial isOpen={true} children={<p>Loading Media</p>} />;
     }
-
-    let sortedVideos = Object.keys(collections).reduce((prev, curr) => {
-        let collection = collections[curr];
-        collection.forEach((video) => {
-            if (prev && !prev.includes(video)) {
-                prev.push(video);
-            }
-        });
-        return prev;
-    }, []);
-
-    let unsortedVideos = videos.filter((video) => {
-        return !sortedVideos.includes(video._id) && video._id.startsWith('_');
-    });
 
     return (
         <div>

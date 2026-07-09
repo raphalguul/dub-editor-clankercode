@@ -152,6 +152,18 @@ button.selected {
     cursor: e-resize;
 }
 
+.timeline-zoom button {
+    font-family: monospace;
+    font-size: 11px;
+    padding: 1px 6px;
+    min-width: 22px;
+}
+
+.timeline-zoom span {
+    font-size: 11px;
+    user-select: none;
+}
+
 .subtitle-list {
     height: 100px;
     overflow-y: scroll;
@@ -360,4 +372,35 @@ input[type='range']::-webkit-slider-runnable-track {
 
 input[type='range']:focus::-webkit-slider-runnable-track {
     background: #367ebd;
+}
+
+.locked-clip {
+    opacity: 0.5;
+    background-color: #555;
+    cursor: not-allowed;
+}
+
+.locked-resize-left,
+.locked-resize-right {
+    cursor: not-allowed;
+}
+
+@keyframes blink-red {
+    0% {
+        outline: 2px solid red;
+        outline-offset: 2px;
+    }
+    100% {
+        outline: 2px solid transparent;
+        outline-offset: 2px;
+    }
+}
+
+.blink-red {
+    animation: blink-red 0.4s ease-out;
+}
+
+.clip-lock-col {
+    width: 24px;
+    text-align: center;
 }

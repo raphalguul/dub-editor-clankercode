@@ -2,14 +2,30 @@ import log from 'electron-log';
 
 const ffmpeg = require('fluent-ffmpeg');
 
-const COMPATIBLE_VIDEO_CODECS = ['h264'];
-const COMPATIBLE_AUDIO_CODECS = ['aac'];
+const COMPATIBLE_VIDEO_CODECS = ['h264', 'hevc', 'vp8', 'vp9', 'av1'];
+const COMPATIBLE_AUDIO_CODECS = ['aac', 'mp3', 'opus', 'flac', 'ac3', 'eac3', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le'];
 const COMPATIBLE_CONTAINER = 'mp4';
 
 interface ProbeResult {
     container: string;
     videoCodec: string | null;
     audioCodec: string | null;
+}
+
+interface AudioTrackInfo {
+    index: number;
+    codec: string | null;
+    language: string | null;
+    channels: number;
+    channelLayout: string | null;
+    title: string | null;
+}
+
+interface MediaInfo {
+    tracks: AudioTrackInfo[];
+    videoCodec: string | null;
+    videoPixFmt: string | null;
+    duration: number;
 }
 
 function probeVideo(filePath: string): Promise<ProbeResult> {
@@ -60,6 +76,7 @@ function convertToCompatible(inputPath: string, outputPath: string): Promise<voi
             .videoCodec('libx264')
             .audioCodec('aac')
             .audioBitrate('192k')
+            .audioChannels(2)
             .outputOptions(['-crf', '23', '-preset', 'medium'])
             .output(outputPath)
             .on('end', () => {
@@ -74,4 +91,35 @@ function convertToCompatible(inputPath: string, outputPath: string): Promise<voi
     });
 }
 
-export { probeVideo, isCompatible, convertToCompatible };
+function probeMediaInfo(filePath: string): Promise<MediaInfo> {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(filePath, (err: any, metadata: any) => {
+            if (err) {
+                log.error('ffprobe failed: ' + err);
+                reject(err);
+                return;
+            }
+
+            const videoStream = metadata.streams.find((s: any) => s.codec_type === 'video');
+            const audioStreams = metadata.streams.filter((s: any) => s.codec_type === 'audio');
+            const tracks: AudioTrackInfo[] = audioStreams.map((s: any) => ({
+                index: s.index,
+                codec: s.codec_name || null,
+                language: s.tags?.language || null,
+                channels: s.channels || 0,
+                channelLayout: s.channel_layout || null,
+                title: s.tags?.title || null,
+            }));
+
+            resolve({
+                tracks,
+                videoCodec: videoStream?.codec_name || null,
+                videoPixFmt: videoStream?.pix_fmt || null,
+                duration: parseFloat(metadata.format?.duration || '0'),
+            });
+        });
+    });
+}
+
+export { probeVideo, isCompatible, convertToCompatible, probeMediaInfo };
+

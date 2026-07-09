@@ -1,5 +1,4 @@
-import AddSubButton from './AddSubButton';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 let convertMillisecondsToTimestamp = (milliseconds) => {
     let seconds = milliseconds / 1000;
@@ -42,9 +41,28 @@ export default ({
     }
 
     let videoLengthMs = videoLength * 1000;
-    let defaultClipSize = videoLengthMs * 0.1;
+
+    const [zoom, setZoom] = useState(1);
+    const [viewStartMs, setViewStartMs] = useState(0);
+    const [blinkingSubIndex, setBlinkingSubIndex] = useState(null);
+    const blinkTimerRef = useRef(null);
+
+    const triggerBlink = (index) => {
+        setBlinkingSubIndex(index);
+        if (blinkTimerRef.current) {
+            clearTimeout(blinkTimerRef.current);
+        }
+        blinkTimerRef.current = setTimeout(() => {
+            setBlinkingSubIndex(null);
+            blinkTimerRef.current = null;
+        }, 400);
+    };
+
     let currentSliderPosition = actualSliderPosition - offset;
     let currentPosition = currentSliderPosition / 1000;
+
+    let visibleWindowMs = Math.max(1, videoLengthMs / Math.max(1, zoom));
+    let viewEndMs = viewStartMs + visibleWindowMs;
 
     useEffect(() => {
         document.ondragover = (e) => {
@@ -52,16 +70,101 @@ export default ({
         };
     });
 
-    const createNewSub = () => {
-        onSubsChange('add', {
-            rowIndex: currentRow,
-            startTime: parseInt(currentSliderPosition),
-            endTime: parseInt(currentSliderPosition) + defaultClipSize,
-            text: '',
-            type: 'subtitle',
-            voice: 'male',
-            speaker: '',
-        });
+    useEffect(() => {
+        return () => {
+            if (blinkTimerRef.current) {
+                clearTimeout(blinkTimerRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!videoLengthMs || videoLengthMs <= 0) {
+            return;
+        }
+        if (zoom <= 1) {
+            setViewStartMs(0);
+            return;
+        }
+        let margin = visibleWindowMs * 0.15;
+        if (currentSliderPosition < viewStartMs + margin) {
+            setViewStartMs(
+                Math.max(0, currentSliderPosition - margin)
+            );
+        } else if (currentSliderPosition > viewEndMs - margin) {
+            setViewStartMs(
+                Math.max(
+                    0,
+                    Math.min(
+                        videoLengthMs - visibleWindowMs,
+                        currentSliderPosition - visibleWindowMs + margin
+                    )
+                )
+            );
+        }
+    }, [currentSliderPosition, zoom, videoLengthMs]);
+
+    if (!videoLengthMs || videoLengthMs <= 0) {
+        return <div className="timeline" style={{ width: timelineWidth }} />;
+    }
+
+    let timeToPixel = (timeMs) =>
+        ((timeMs - viewStartMs) / visibleWindowMs) * timelineWidth;
+
+    let pixelToTimeDelta = (pixelDelta) =>
+        (pixelDelta / timelineWidth) * visibleWindowMs;
+
+    let handleWheel = (e) => {
+        e.preventDefault();
+        let rect = e.currentTarget.getBoundingClientRect();
+        let mouseX = e.clientX - rect.left;
+        let timeAtMouse = viewStartMs + (mouseX / timelineWidth) * visibleWindowMs;
+
+        let factor = e.deltaY < 0 ? 1.3 : 1 / 1.3;
+        let newZoom = Math.max(1, Math.min(100, zoom * factor));
+
+        let newVisibleWindow = videoLengthMs / newZoom;
+        let newViewStart = timeAtMouse - (mouseX / timelineWidth) * newVisibleWindow;
+        newViewStart = Math.max(
+            0,
+            Math.min(videoLengthMs - newVisibleWindow, newViewStart)
+        );
+
+        setZoom(newZoom);
+        setViewStartMs(newViewStart);
+    };
+
+    let zoomIn = () => {
+        let centerTime = viewStartMs + visibleWindowMs / 2;
+        let newZoom = Math.min(100, zoom * 2);
+        if (newZoom === zoom) return;
+        let newVisibleWindow = videoLengthMs / newZoom;
+        let newViewStart = centerTime - newVisibleWindow / 2;
+        newViewStart = Math.max(
+            0,
+            Math.min(videoLengthMs - newVisibleWindow, newViewStart)
+        );
+        setZoom(newZoom);
+        setViewStartMs(newViewStart);
+    };
+
+    let zoomOut = () => {
+        let centerTime = viewStartMs + visibleWindowMs / 2;
+        let newZoom = Math.max(1, zoom / 2);
+        if (newZoom === zoom) return;
+        let newVisibleWindow = videoLengthMs / newZoom;
+        let newViewStart = centerTime - newVisibleWindow / 2;
+        newViewStart = Math.max(
+            0,
+            Math.min(videoLengthMs - newVisibleWindow, newViewStart)
+        );
+        setZoom(newZoom);
+        setViewStartMs(newViewStart);
+    };
+
+    let resetZoom = () => {
+        setZoom(1);
+        setViewStartMs(0);
     };
 
     const timelineRows = [];
@@ -75,8 +178,18 @@ export default ({
         timelineRows[sub.rowIndex].push(sub);
     });
 
+    const markers = [];
+    if (videoLengthMs > 0) {
+        const visibleStart = Math.max(0, viewStartMs);
+        const visibleEnd = Math.min(videoLengthMs, viewEndMs);
+        const firstMark = Math.ceil(visibleStart / 10000) * 10000;
+        for (let t = firstMark; t <= visibleEnd; t += 10000) {
+            markers.push({ timeMs: t, isMinute: t % 60000 === 0 });
+        }
+    }
+
     return (
-        <div className="timeline" style={{width: timelineWidth}}>
+        <div className="timeline" style={{width: timelineWidth}} onWheel={handleWheel}>
             <div
                 style={{
                     display: 'flex',
@@ -86,6 +199,16 @@ export default ({
             >
                 <div>
                     {convertMillisecondsToTimestamp(currentSliderPosition)}
+                </div>
+                <div className="timeline-zoom" style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                    <button title="Zoom Out" onClick={zoomOut}>-</button>
+                    <span style={{ minWidth: '50px', display: 'inline-block', textAlign: 'center', fontFamily: 'monospace' }}>
+                        {Math.round(zoom * 100)}%
+                    </span>
+                    <button title="Zoom In" onClick={zoomIn}>+</button>
+                    {zoom > 1 && (
+                        <button title="Reset Zoom" onClick={resetZoom} style={{ marginLeft: '4px' }}>1:1</button>
+                    )}
                 </div>
                 <div>
                     <button
@@ -171,9 +294,10 @@ export default ({
                     padding: '0px',
                     margin: '0px',
                 }}
-                value={currentSliderPosition}
+                value={Math.max(viewStartMs, Math.min(viewEndMs, currentSliderPosition))}
+                min={viewStartMs}
                 step={1}
-                max={videoLengthMs}
+                max={viewEndMs}
                 onChange={(e) => {
                     onSliderPositionChange(parseFloat(e.target.value) + offset);
                 }}
@@ -187,10 +311,7 @@ export default ({
                 <div
                     style={{
                         position: 'absolute',
-                        left: `${
-                            (currentSliderPosition / videoLengthMs) *
-                            timelineWidth
-                        }px`,
+                        left: `${timeToPixel(currentSliderPosition)}px`,
                         width: '2px',
                         height: '100%',
                         backgroundColor: 'black',
@@ -203,6 +324,7 @@ export default ({
                             style={{
                                 cursor: 'pointer',
                                 position: 'relative',
+                                overflow: 'hidden',
                                 borderTop:
                                     rowIndex === 0 ? '1px solid black' : 'none',
                                 borderBottom: '1px solid black',
@@ -225,7 +347,7 @@ export default ({
                                 let subLength = sub.endTime - sub.startTime;
                                 let dragDelta = event.clientX - dragStart;
                                 let timeDelta =
-                                    (dragDelta / timelineWidth) * videoLengthMs;
+                                    pixelToTimeDelta(dragDelta);
                                 let startTime = dragStartTime + timeDelta;
                                 let endTime = startTime + subLength;
 
@@ -251,8 +373,13 @@ export default ({
                                 return (
                                     <>
                                         <div
-                                            className="resize-left"
+                                            className={`resize-left ${sub.locked ? 'locked-resize-left' : ''} ${blinkingSubIndex === sub.index ? 'blink-red' : ''}`}
                                             onDragStart={(event) => {
+                                                if (sub.locked) {
+                                                    event.preventDefault();
+                                                    triggerBlink(sub.index);
+                                                    return;
+                                                }
                                                 isResizing = true;
 
                                                 const img = new Image();
@@ -268,14 +395,10 @@ export default ({
                                                 dragStartTime = sub.startTime;
                                             }}
                                             onDrag={(event) => {
-                                                let subLength =
-                                                    sub.endTime - sub.startTime;
                                                 let dragDelta =
                                                     event.clientX - dragStart;
                                                 let timeDelta =
-                                                    (dragDelta /
-                                                        timelineWidth) *
-                                                    videoLengthMs;
+                                                    pixelToTimeDelta(dragDelta);
                                                 let startTime = Math.max(
                                                     0,
                                                     dragStartTime + timeDelta
@@ -291,29 +414,28 @@ export default ({
                                                 );
                                                 onSubSelect(sub.index);
                                             }}
-                                            onDragEnd={(event) => {
+                                            onDragEnd={(_event) => {
                                                 isResizing = false;
                                                 onSubsChange('sort');
                                             }}
                                             draggable
                                             style={{
-                                                left: `${
-                                                    timelineWidth *
-                                                    (sub.startTime /
-                                                        videoLengthMs)
-                                                }px`,
+                                                left: `${timeToPixel(
+                                                    sub.startTime
+                                                )}px`,
                                             }}
                                         ></div>
                                         <div
-                                            className={`${
-                                                sub.index === currentSub
-                                                    ? 'subtitle selected'
-                                                    : 'subtitle'
-                                            }`}
+                                            className={`${sub.index === currentSub ? 'subtitle selected' : 'subtitle'} ${sub.locked ? 'locked-clip' : ''} ${blinkingSubIndex === sub.index ? 'blink-red' : ''}`}
                                             onClick={() => {
                                                 onSubSelect(sub.index);
                                             }}
                                             onDragStart={(event) => {
+                                                if (sub.locked) {
+                                                    event.preventDefault();
+                                                    triggerBlink(sub.index);
+                                                    return;
+                                                }
                                                 dragSub = sub.index;
 
                                                 const img = new Image();
@@ -335,9 +457,7 @@ export default ({
                                                 let dragDelta =
                                                     event.clientX - dragStart;
                                                 let timeDelta =
-                                                    (dragDelta /
-                                                        timelineWidth) *
-                                                    videoLengthMs;
+                                                    pixelToTimeDelta(dragDelta);
                                                 let startTime =
                                                     dragStartTime + timeDelta;
                                                 let endTime =
@@ -367,32 +487,33 @@ export default ({
                                                 );
                                                 onSubSelect(sub.index);
                                             }}
-                                            onDragEnd={(event) => {
-                                                dragSub = null;
+                                            onDragEnd={(_event) => {
+                                                dragResizeRight = null;
                                                 onSubsChange('sort');
                                             }}
                                             draggable
                                             style={{
-                                                left: `${
-                                                    timelineWidth *
-                                                    (sub.startTime /
-                                                        videoLengthMs)
-                                                }px`,
+                                                left: `${timeToPixel(
+                                                    sub.startTime
+                                                )}px`,
                                                 width: `${
-                                                    timelineWidth *
-                                                    ((sub.endTime -
-                                                        sub.startTime) /
-                                                        videoLengthMs)
+                                                    timeToPixel(sub.endTime) -
+                                                    timeToPixel(sub.startTime)
                                                 }px`,
                                                 textAlign: 'center',
                                                 lineHeight: '25px',
                                             }}
                                         >
-                                            {sub.index}
+                                            {sub.locked ? '\uD83D\uDD12 ' : ''}{sub.index}
                                         </div>
                                         <div
-                                            className="resize-right"
+                                            className={`resize-right ${sub.locked ? 'locked-resize-right' : ''} ${blinkingSubIndex === sub.index ? 'blink-red' : ''}`}
                                             onDragStart={(event) => {
+                                                if (sub.locked) {
+                                                    event.preventDefault();
+                                                    triggerBlink(sub.index);
+                                                    return;
+                                                }
                                                 isResizing = true;
 
                                                 const img = new Image();
@@ -408,14 +529,10 @@ export default ({
                                                 dragEndTime = sub.endTime;
                                             }}
                                             onDrag={(event) => {
-                                                let subLength =
-                                                    sub.endTime - sub.startTime;
                                                 let dragDelta =
                                                     event.clientX - dragStart;
                                                 let timeDelta =
-                                                    (dragDelta /
-                                                        timelineWidth) *
-                                                    videoLengthMs;
+                                                    pixelToTimeDelta(dragDelta);
                                                 let endTime = Math.min(
                                                     dragEndTime + timeDelta,
                                                     videoLengthMs
@@ -431,16 +548,14 @@ export default ({
                                                 );
                                                 onSubSelect(sub.index);
                                             }}
-                                            onDragEnd={(event) => {
+                                            onDragEnd={(_event) => {
                                                 isResizing = false;
                                                 onSubsChange('sort');
                                             }}
                                             draggable
                                             style={{
                                                 left: `${
-                                                    timelineWidth *
-                                                        (sub.endTime /
-                                                            videoLengthMs) -
+                                                    timeToPixel(sub.endTime) -
                                                     10
                                                 }px`,
                                             }}
@@ -451,6 +566,93 @@ export default ({
                         </div>
                     );
                 })}
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        pointerEvents: 'none',
+                        zIndex: 5000,
+                    }}
+                >
+                    {markers.map((m) => (
+                        <div
+                            key={m.timeMs}
+                            style={{
+                                position: 'absolute',
+                                left: `${timeToPixel(m.timeMs)}px`,
+                                top: 0,
+                                width: '1px',
+                                height: '100%',
+                                backgroundColor: m.isMinute ? '#ff6b6b' : '#555',
+                                opacity: m.isMinute ? 0.9 : 0.6,
+                            }}
+                        />
+                    ))}
+                </div>
+            </div>
+            <div
+                style={{
+                    width: `${timelineWidth}px`,
+                    height: '14px',
+                    position: 'relative',
+                    backgroundColor: '#333',
+                    borderRadius: '2px',
+                    cursor: 'pointer',
+                    marginTop: '4px',
+                }}
+                onMouseDown={(e) => {
+                    if (e.target === e.currentTarget) {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const x = e.clientX - rect.left;
+                        const targetMs = (x / timelineWidth) * videoLengthMs;
+                        setViewStartMs(Math.max(0, Math.min(
+                            videoLengthMs - visibleWindowMs,
+                            targetMs - visibleWindowMs / 2
+                        )));
+                    }
+                }}
+            >
+                <div
+                    style={{
+                        position: 'absolute',
+                        left: `${videoLengthMs > 0 ? (viewStartMs / videoLengthMs) * timelineWidth : 0}px`,
+                        width: `${videoLengthMs > 0 ? Math.max(10, (visibleWindowMs / videoLengthMs) * timelineWidth) : timelineWidth}px`,
+                        height: '100%',
+                        backgroundColor: '#777',
+                        borderRadius: '2px',
+                        cursor: 'grab',
+                        minWidth: '10px',
+                    }}
+                    onMouseDown={(e) => {
+                        e.stopPropagation();
+                        const startX = e.clientX;
+                        const startVSM = viewStartMs;
+                        const trackW = timelineWidth;
+                        const vidLen = videoLengthMs;
+                        const visWin = visibleWindowMs;
+
+                        const onMouseMove = (ev) => {
+                            const dx = ev.clientX - startX;
+                            const ratio = dx / trackW;
+                            const deltaMs = ratio * vidLen;
+                            setViewStartMs(Math.max(0, Math.min(
+                                vidLen - visWin,
+                                startVSM + deltaMs
+                            )));
+                        };
+
+                        const onMouseUp = () => {
+                            document.removeEventListener('mousemove', onMouseMove);
+                            document.removeEventListener('mouseup', onMouseUp);
+                        };
+
+                        document.addEventListener('mousemove', onMouseMove);
+                        document.addEventListener('mouseup', onMouseUp);
+                    }}
+                />
             </div>
         </div>
     );

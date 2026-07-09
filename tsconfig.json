@@ -1,6 +1,6 @@
 {
     "compilerOptions": {
-        "target": "es2021",
+        "target": "es2022",
         "module": "commonjs",
         "lib": ["dom", "es2021"],
         "declaration": true,
@@ -23,3 +23,4 @@
     },
     "exclude": ["test", "release/build", "release/app/dist", ".erb/dll"]
 }
+

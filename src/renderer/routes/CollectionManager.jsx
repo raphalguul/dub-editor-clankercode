@@ -1,6 +1,5 @@
 import CollectionAPI from 'renderer/api/CollectionAPI';
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router';
 import { toast } from 'react-toastify';
 import ImageSelector from 'renderer/components/ImageSelector';
 import { handleInterstitial } from 'renderer/components/interstitial/Interstitial';
@@ -75,12 +74,6 @@ export default () => {
             videoId
         );
         setCollections(collectionMap);
-    };
-
-    const launch = async (except) => {
-        const gameId = game === 'rifftrax' ? '1707870' : '1495860';
-        await window.api.send('disableVideos', { game, except });
-        window.open(`steam://run/${gameId}`);
     };
 
     const exportCollection = async (collectionId) => {
@@ -228,7 +221,7 @@ export default () => {
                             <td></td>
                             <td></td>
                         </tr>
-                        {Object.keys(collections).map((key) => {
+                        {Object.keys(collections).sort().map((key) => {
                             return (
                                 <tr key={key}>
                                     <td style={{ textAlign: 'left' }}>

@@ -6,7 +6,8 @@ let hasEnded = false;
 
 export default (props) => {
     const [muted, setMuted] = useState(false);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const [videoError, setVideoError] = useState(null);
     const currentIndexRef = useRef(-1);
     const intervalRef = useRef(null);
     const shouldMuteRef = useRef(false);
@@ -28,15 +29,19 @@ export default (props) => {
     });
 
     useEffect(() => {
-        videoElement.current.currentTime = props.videoPosition;
+        if (videoElement.current) {
+            videoElement.current.currentTime = props.videoPosition;
+        }
         isTalking = false;
         setMuted(false);
         currentIndexRef.current = -1;
     }, [props.videoPosition, props.seekKey]);
 
     useEffect(() => {
+        if (!videoElement.current) return;
         if (props.isPlaying) {
-            videoElement.current.play();
+            const promise = videoElement.current.play();
+            if (promise !== undefined) promise.catch(() => {});
         } else {
             videoElement.current.pause();
         }
@@ -63,7 +68,10 @@ export default (props) => {
         msg.onend = () => {
             setIsTalking(false);
             let ve = document.getElementById('videoElement');
-            ve.play();
+            if (ve) {
+                const promise = ve.play();
+                if (promise !== undefined) promise.catch(() => {});
+            }
 
             if (hasEnded) {
                 props.onEnd();
@@ -145,7 +153,8 @@ export default (props) => {
                         transform: 'translate(-50%, -50%)',
                     }}
                 >
-                    {loading ? 'Loading Video...' : null}
+                    {loading && !videoError ? 'Loading Video...' : null}
+                    {videoError ? `Video Error: ${videoError}` : null}
                 </div>
                     {props.videoSource ? (
                     <video
@@ -161,7 +170,17 @@ export default (props) => {
                                 hasEnded = true;
                             }
                         }}
-                        onCanPlay={() => {
+                        onLoadStart={() => window.api.send('log', 'WTD: loadStart')}
+                        onLoadedMetadata={() => window.api.send('log', 'WTD: loadedMetadata')}
+                        onCanPlay={() => { window.api.send('log', 'WTD: canPlay'); setLoading(false); }}
+                        onWaiting={() => window.api.send('log', 'WTD: waiting')}
+                        onStalled={() => window.api.send('log', 'WTD: stalled')}
+                        onError={(e) => {
+                            const ve = e.target;
+                            const err = ve?.error;
+                            const msg = err ? `code=${err.code} message=${err.message}` : 'unknown error';
+                            window.api.send('log', 'WTD: error ' + msg);
+                            setVideoError(msg);
                             setLoading(false);
                         }}
                         controls={props.controls}
@@ -172,7 +191,7 @@ export default (props) => {
                         <track
                             label="English"
                             kind="subtitles"
-                            srclang="en"
+                            srcLang="en"
                             src={createWebVttDataUri(
                                 props.subs,
                                 props.substitution,
@@ -203,7 +222,8 @@ export default (props) => {
                     transform: 'translate(-50%, -50%)',
                 }}
             >
-                {loading ? 'Loading Video...' : null}
+                {loading && !videoError ? 'Loading Video...' : null}
+                {videoError ? `Video Error: ${videoError}` : null}
             </div>
             {props.videoSource ? (
                 <video
@@ -218,7 +238,17 @@ export default (props) => {
                             hasEnded = true;
                         }
                     }}
-                    onCanPlay={() => {
+                    onLoadStart={() => window.api.send('log', 'WTD: loadStart2')}
+                    onLoadedMetadata={() => window.api.send('log', 'WTD: loadedMetadata2')}
+                    onCanPlay={() => { window.api.send('log', 'WTD: canPlay2'); setLoading(false); }}
+                    onWaiting={() => window.api.send('log', 'WTD: waiting2')}
+                    onStalled={() => window.api.send('log', 'WTD: stalled2')}
+                    onError={(e) => {
+                        const ve = e.target;
+                        const err = ve?.error;
+                        const msg = err ? `code=${err.code} message=${err.message}` : 'unknown error';
+                        window.api.send('log', 'WTD: error ' + msg);
+                        setVideoError(msg);
                         setLoading(false);
                     }}
                     controls={props.controls}
