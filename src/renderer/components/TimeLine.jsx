@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 let convertMillisecondsToTimestamp = (milliseconds) => {
+    if (milliseconds < 0) {
+        return '00:00:00,000';
+    }
+
     let seconds = milliseconds / 1000;
     let h = Math.floor(seconds / 3600);
     let m = Math.floor((seconds % 3600) / 60);
@@ -46,6 +50,7 @@ export default ({
     const [viewStartMs, setViewStartMs] = useState(0);
     const [blinkingSubIndex, setBlinkingSubIndex] = useState(null);
     const blinkTimerRef = useRef(null);
+    const timelineContainerRef = useRef(null);
 
     const triggerBlink = (index) => {
         setBlinkingSubIndex(index);
@@ -77,6 +82,17 @@ export default ({
             }
         };
     }, []);
+
+    useEffect(() => {
+        const el = timelineContainerRef.current;
+        if (!el) {
+            return;
+        }
+        el.addEventListener('wheel', handleWheel, { passive: false });
+        return () => {
+            el.removeEventListener('wheel', handleWheel);
+        };
+    }, [videoLengthMs, zoom, viewStartMs, timelineWidth]);
 
     useEffect(() => {
         if (!videoLengthMs || videoLengthMs <= 0) {
@@ -189,7 +205,7 @@ export default ({
     }
 
     return (
-        <div className="timeline" style={{width: timelineWidth}} onWheel={handleWheel}>
+        <div className="timeline" style={{width: timelineWidth}} ref={timelineContainerRef}>
             <div
                 style={{
                     display: 'flex',
@@ -321,6 +337,7 @@ export default ({
                 {timelineRows.map((timelineRow, rowIndex) => {
                     return (
                         <div
+                            key={rowIndex}
                             style={{
                                 cursor: 'pointer',
                                 position: 'relative',
@@ -371,7 +388,7 @@ export default ({
                         >
                             {timelineRow.map((sub) => {
                                 return (
-                                    <>
+                                    <React.Fragment key={sub.index}>
                                         <div
                                             className={`resize-left ${sub.locked ? 'locked-resize-left' : ''} ${blinkingSubIndex === sub.index ? 'blink-red' : ''}`}
                                             onDragStart={(event) => {
@@ -560,7 +577,7 @@ export default ({
                                                 }px`,
                                             }}
                                         ></div>
-                                    </>
+                                    </React.Fragment>
                                 );
                             })}
                         </div>

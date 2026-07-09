@@ -108,6 +108,7 @@ export default ({
                         {clips.map((clip) => {
                             return (
                                 <tr
+                                    key={clip.index}
                                     className={`${clip.index === currentClip ? 'selected' : ''} ${blinkingClipIndex === clip.index ? 'blink-red' : ''}`}
                                     style={{ cursor: 'pointer' }}
                                     onClick={() => {
@@ -188,6 +189,7 @@ export default ({
                 <h3>Clip Editor</h3>
                 <div className="subtitle-editor">
                     <table style={{ margin: 'auto' }}>
+                        <tbody>
                         <tr>
                             <td>
                                 <label>Start</label>
@@ -299,6 +301,7 @@ export default ({
                             </td>
                             <td></td>
                         </tr>
+                        </tbody>
                     </table>
                 </div>
         </div>

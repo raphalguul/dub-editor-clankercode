@@ -495,8 +495,8 @@ let AdvancedEditor = () => {
     };
 
     let scrub = (milliseconds) => {
-        if (milliseconds < 0) {
-            milliseconds = 0;
+        if (milliseconds < Math.max(0, stateRef.current.offset)) {
+            milliseconds = Math.max(0, stateRef.current.offset);
         } else if (milliseconds > stateRef.current.actualVideoLength * 1000) {
             milliseconds = stateRef.current.videoLength * 1000;
         }
@@ -746,7 +746,7 @@ let AdvancedEditor = () => {
                                 setCurrentSub(index);
                             }}
                             onVideoPositionChange={(position) => {
-                                setCurrentSliderPosition(position * 1000);
+                                setCurrentSliderPosition(Math.max(offset, position * 1000));
                             }}
                             onVideoLoaded={async (video) => {
                                 if (!isBatch) {

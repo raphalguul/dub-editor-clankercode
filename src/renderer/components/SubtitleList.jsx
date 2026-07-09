@@ -106,6 +106,7 @@ export default ({
             <h3>Clip Details</h3>
             <div className="video-editor">
                 <table style={{ margin: 'auto' }}>
+                    <tbody>
                     <tr>
                         <td>Clip Name</td>
                         <td>
@@ -145,7 +146,7 @@ export default ({
                                 <option key="_none">None</option>
                                 {Object.keys(collections).sort().map(
                                     (collectionId) => (
-                                        <option>{collectionId}</option>
+                                        <option key={collectionId}>{collectionId}</option>
                                     )
                                 )}
                             </select>
@@ -171,7 +172,7 @@ export default ({
                             </label>
                         </td>
                     </tr>
-
+                    </tbody>
                 </table>
                 <button
                     onClick={() => {
@@ -202,6 +203,7 @@ export default ({
                         {subs.map((sub) => {
                             return (
                                 <tr
+                                    key={sub.index}
                                     className={
                                         sub.index === currentSub
                                             ? 'selected'
@@ -261,6 +263,7 @@ export default ({
             <h3>Subtitle Editor</h3>
             <div className="subtitle-editor">
                 <table style={{ margin: 'auto' }}>
+                    <tbody>
                     <tr>
                         <td>
                             <label>Start</label>
@@ -435,6 +438,7 @@ export default ({
                             </td>
                         </tr>
                     ) : null}
+                    </tbody>
                 </table>
             </div>
         </div>
