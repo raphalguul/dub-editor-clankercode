@@ -27,7 +27,7 @@ import defaultConfig from './defaultConfig';
 import JSZip from 'jszip';
 import { ClipPaths, DirectoryList } from './types';
 import * as whisper from './whisper';
-import { isCompatible, convertToCompatible, probeMediaInfo } from './videoFormat';
+import { isCompatible, convertToCompatible, probeMediaInfo, AudioTrackInfo } from './videoFormat';
 
 const ffmpeg = require('fluent-ffmpeg');
 const StreamZip = require('node-stream-zip');
@@ -926,7 +926,11 @@ function serveFile(filePath: string, mime: string, rangeHeader: string | null): 
             if (isNaN(start)) { start = Math.max(0, fileSize + start); end = fileSize - 1; }
             else { if (isNaN(end) || end >= fileSize) end = Math.min(fileSize - 1, start + MAX_CHUNK - 1); }
             const chunkSize = end - start + 1;
-            const data = fs.readFileSync(filePath, { start, end });
+            const buf = Buffer.alloc(chunkSize);
+            const fd = fs.openSync(filePath, 'r');
+            fs.readSync(fd, buf, 0, chunkSize, start);
+            fs.closeSync(fd);
+            const data = buf;
             return new Response(data, {
                 status: 206,
                 headers: {
@@ -1267,7 +1271,7 @@ ipcMain.handle(
                             .outputOptions(['-map', '0:v:0', '-map', '0:' + audioTrackIndex])
                             .output(videoFilePath)
                             .on('end', resolve)
-                            .on('error', (err) => { log.error('Stream copy failed: ' + err); reject(err); })
+                            .on('error', (err: Error) => { log.error('Stream copy failed: ' + err); reject(err); })
                             .run();
                     });
                 } else {
@@ -1605,7 +1609,7 @@ ipcMain.handle('log', (event, msg) => {
     log.info('[r] ' + msg);
 });
 
-ipcMain.handle('showAudioTrackPrompt', async (event, { tracks }) => {
+ipcMain.handle('showAudioTrackPrompt', async (event, { tracks }: { tracks: AudioTrackInfo[] }) => {
     const detail = tracks.map((t, i) =>
         `Track ${i + 1}: ${t.codec?.toUpperCase() || 'Unknown'} ${t.channels}ch${t.language ? `, ${t.language}` : ''}${t.title ? ` - ${t.title}` : ''}`
     ).join('\n');
@@ -1656,7 +1660,7 @@ ipcMain.handle('remuxForPlayback', async (event, { videoSource, audioTrackIndex 
     const needAudioReencode = !compatibleAudioCodecs.includes(audioCodec);
     const compatibleVideoCodecs = ['h264', 'hevc', 'vp8', 'vp9', 'av1'];
     const isH264_8bit = probeData.videoCodec === 'h264' && (probeData.videoPixFmt === 'yuv420p' || probeData.videoPixFmt === 'yuvj420p');
-    const needVideoReencode = !compatibleVideoCodecs.includes(probeData.videoCodec) || (probeData.videoCodec === 'h264' && !isH264_8bit);
+    const needVideoReencode = !probeData.videoCodec || !compatibleVideoCodecs.includes(probeData.videoCodec) || (probeData.videoCodec === 'h264' && !isH264_8bit);
     log.info('REMUX DECISION: vcodec=' + probeData.videoCodec + ' pix=' + probeData.videoPixFmt + ' audio=' + audioCodec + ' video=' + (needVideoReencode ? 'reencode' : 'copy') + ' audio=' + (needAudioReencode ? 'reencode' : 'copy'));
     if (!fs.existsSync(CACHE_DIR)) { fs.mkdirSync(CACHE_DIR, { recursive: true }); }
     const convPath = cachedFile + '.conv';

@@ -12,7 +12,7 @@ interface ProbeResult {
     audioCodec: string | null;
 }
 
-interface AudioTrackInfo {
+export interface AudioTrackInfo {
     index: number;
     codec: string | null;
     language: string | null;
