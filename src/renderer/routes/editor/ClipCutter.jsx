@@ -43,7 +43,7 @@ let ClipCutter = () => {
     const [clipName, setClipName] = useState('');
 
     let videoLengthMs = videoLength * 1000;
-    let defaultClipSize = videoLengthMs * 0.1; // The recommended maximum length
+    let defaultClipSize = 8000; // 8 seconds
 
     window.onresize = () => {
         setWindowSize({ width: window.innerWidth, height: window.innerHeight });

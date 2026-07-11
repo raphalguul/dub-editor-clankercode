@@ -36,7 +36,7 @@ export default ({
     let currentClipObject = clips[currentClip];
 
     let videoLengthMs = videoLength * 1000;
-    let defaultClipSize = videoLengthMs * 0.1;
+    let defaultClipSize = 8000; // 8 seconds
 
     useEffect(() => {
         return () => {

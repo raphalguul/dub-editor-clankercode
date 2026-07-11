@@ -60,7 +60,7 @@ let AdvancedEditor = () => {
     const [actualVideoLength, setActualVideoLength] = useState(0);
 
     let videoLengthMs = videoLength * 1000;
-    let defaultClipSize = videoLengthMs * 0.1;
+    let defaultClipSize = 8000; // 8 seconds
 
     let isBatch = searchParams.get('batch') === 'true';
 
