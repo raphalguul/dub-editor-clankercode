@@ -43,7 +43,7 @@ export default ({
     const [rememberAddCollection, setRememberAddCollection] = useState(false);
 
     let videoLengthMs = videoLength * 1000;
-    let defaultClipSize = 8000; // 8 seconds
+    let defaultClipSize = videoLengthMs * 0.1;
 
     useEffect(() => {
         getCollections();
@@ -246,11 +246,14 @@ export default ({
             <button
                 title="n"
                 onClick={() => {
+                    let startTime = parseInt(currentSliderPosition);
+                    let nextSub = subs.find(sub => sub.startTime > startTime);
+                    let maxEnd = nextSub ? nextSub.startTime : videoLengthMs;
+                    let endTime = Math.min(startTime + defaultClipSize, maxEnd);
                     onSubsChange('add', {
                         rowIndex: currentRow,
-                        startTime: parseInt(currentSliderPosition),
-                        endTime:
-                            Math.min(parseInt(currentSliderPosition) + defaultClipSize, videoLengthMs),
+                        startTime: startTime,
+                        endTime: endTime,
                         text: '',
                         type: 'subtitle',
                         voice: 'male',

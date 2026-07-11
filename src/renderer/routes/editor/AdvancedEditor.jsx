@@ -635,6 +635,9 @@ let AdvancedEditor = () => {
                 newSubs.sort((a, b) => a.startTime - b.startTime).map((s, i) => ({ ...s, index: i }))
             );
             setSubs(distributed);
+            if (distributed.length > 0) {
+                setCurrentSub(0);
+            }
             toast(`Generated ${results.length} subtitles`, { type: 'info' });
         } catch (err) {
             window.api.removeProgressListener();
