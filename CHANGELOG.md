@@ -19,6 +19,7 @@
 - Collection names are now ordered alphabetically
 - Audio normalizer now correctly writes and checks a file that prevents Dub Editor from normalizing the same file repeatedly
 - Max length of new subtitles is now reduced if they would overlap with existing subtitles
+- Editor now autoselects the first subtitle after auto-generation
 ## Under the Hood Upgrade (this was stupid, but it seems to work)
 - Updated Electron from 18 to 28 (This was done in hopes of improving codec compatibility. Not sure if it was worth it.)
 - Updated electron-builder from 23 to 24

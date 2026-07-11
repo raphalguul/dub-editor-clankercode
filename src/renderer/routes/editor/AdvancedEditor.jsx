@@ -70,13 +70,17 @@ let AdvancedEditor = () => {
 
     const isActiveElementInput = () => {
         let activeElement = document.activeElement;
-        let inputs = ['input', 'select', 'textarea'];
+        if (!activeElement) return false;
 
-        return (
-            activeElement &&
-            activeElement.type !== 'range' &&
-            inputs.indexOf(activeElement.tagName.toLowerCase()) !== -1
-        );
+        let tag = activeElement.tagName.toLowerCase();
+
+        if (tag === 'textarea') return true;
+        if (tag === 'input') {
+            if (activeElement.type === 'range') return false;
+            if (activeElement.type === 'checkbox') return false;
+            return true;
+        }
+        return false;
     };
 
     const stateRef = useRef();
