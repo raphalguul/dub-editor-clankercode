@@ -204,8 +204,10 @@ const processVideo = (inputFilePath: string, outputFilePath: string, startTime: 
             .audioCodec("aac")
             .audioBitrate("192k")
             .audioChannels(2)
+            .audioFrequency(44100)
             .setStartTime(ts)
-            .setDuration(duration / 1000);
+            .setDuration(duration / 1000)
+            .outputOptions(['-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']);
 
         const outputOpts: string[] = [];
         if (audioTrackIndex !== undefined) {
@@ -300,7 +302,8 @@ const normalizeVideo = async (videoPath: string, cfg: any, audioTrackIndex?: num
                     .videoCodec('copy')
                     .audioCodec('aac')
                     .audioBitrate('192k')
-                    .audioChannels(2);
+                    .audioChannels(2)
+                    .audioFrequency(44100);
 
                 const normOpts: string[] = [];
                 if (audioTrackIndex !== undefined) {
