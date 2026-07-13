@@ -1,5 +1,5 @@
 # Change this to your target folder
-$InputFolder = "E:\Projects\WTD\whatthedub\VideoClips"
+$InputFolder = "$PSScriptRoot"
 
 $outDir = Join-Path $InputFolder "_reencoded"
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
