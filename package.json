@@ -1,6 +1,6 @@
 {
     "description": "An application for creating and managing clips for What the Dub and Rifftrax",
-    "version": "2.0.2",
+    "version": "2.0.3",
     "keywords": [
         "electron",
         "boilerplate",
@@ -207,7 +207,8 @@
         "win": {
             "target": [
                 "nsis"
-            ]
+            ],
+            "artifactName": "Dub.Editor.ClankerCode.${version}.${ext}"
         },
         "linux": {
             "target": [

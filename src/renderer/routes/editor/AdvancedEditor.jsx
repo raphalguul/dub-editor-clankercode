@@ -500,8 +500,11 @@ let AdvancedEditor = () => {
     let scrub = (milliseconds) => {
         if (milliseconds < Math.max(0, stateRef.current.offset)) {
             milliseconds = Math.max(0, stateRef.current.offset);
-        } else if (milliseconds > stateRef.current.offset + stateRef.current.videoLength * 1000) {
-            milliseconds = stateRef.current.offset + stateRef.current.videoLength * 1000;
+        } else {
+            let videoEnd = stateRef.current.offset + stateRef.current.videoLength * 1000;
+            if (milliseconds >= videoEnd - 100) {
+                milliseconds = videoEnd + 15;
+            }
         }
 
         console.log('SCRUB TO ' + milliseconds);
@@ -751,6 +754,7 @@ let AdvancedEditor = () => {
                             substitution={substitution}
                             onEnd={() => {
                                 setIsPlaying(false);
+                                setCurrentSliderPosition(stateRef.current.offset + stateRef.current.videoLength * 1000 + 15);
                             }}
                             onIndexChange={(index) => {
                                 setCurrentSub(index);

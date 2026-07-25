@@ -341,16 +341,16 @@ export default ({
                             </button>
                             <button
                                 title="Set end to video end"
-                                onClick={() => {
-                                    onSubsChange(
-                                        'edit',
-                                        {
-                                            ...currentSubObject,
-                                            endTime: videoLength * 1000,
-                                        },
-                                        currentSub
-                                    );
-                                }}
+                                            onClick={() => {
+                                                onSubsChange(
+                                                    'edit',
+                                                    {
+                                                        ...currentSubObject,
+                                                        endTime: videoLength * 1000 + 15,
+                                                    },
+                                                    currentSub
+                                                );
+                                            }}
                                 disabled={!currentSubObject}
                             >
                                 Set End to Video End

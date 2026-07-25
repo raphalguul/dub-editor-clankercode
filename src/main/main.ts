@@ -228,8 +228,7 @@ const processVideo = (inputFilePath: string, outputFilePath: string, startTime: 
             .audioChannels(2)
             .audioFrequency(44100)
             .seekInput(startTime / 1000)
-            .setDuration(duration / 1000)
-            .outputOptions(['-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']);
+            .outputOptions(['-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-t', String(duration / 1000)]);
 
         const outputOpts: string[] = [];
         if (audioTrackIndex !== undefined) {
@@ -280,7 +279,7 @@ const NORMALIZED_MARKER_SUFFIX = '.normalized';
 const normalizeVideo = async (videoPath: string, cfg: any, audioTrackIndex?: number): Promise<boolean> => {
     const markerPath = videoPath + NORMALIZED_MARKER_SUFFIX;
 
-    if (fs.existsSync(markerPath)) {
+if (fs.existsSync(markerPath)) {
         try {
             const marker = JSON.parse(fs.readFileSync(markerPath, 'utf-8'));
             if (
@@ -295,6 +294,22 @@ const normalizeVideo = async (videoPath: string, cfg: any, audioTrackIndex?: num
                 return true;
             }
         } catch {}
+    }
+
+    let duration: number;
+    try {
+        duration = await new Promise<number>((resolve, reject) => {
+            ffmpeg.ffprobe(videoPath, (err: any, metadata: any) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(parseFloat(metadata.format?.duration || '0'));
+                }
+            });
+        });
+    } catch (err) {
+        log.warn('ffprobe failed, skipping normalization: ' + err);
+        return true;
     }
 
     return new Promise((resolve) => {
@@ -325,7 +340,8 @@ const normalizeVideo = async (videoPath: string, cfg: any, audioTrackIndex?: num
                     .audioCodec('aac')
                     .audioBitrate('192k')
                     .audioChannels(2)
-                    .audioFrequency(44100);
+                    .audioFrequency(44100)
+                    .setDuration(duration);
 
                 const normOpts: string[] = [];
                 if (audioTrackIndex !== undefined) {
@@ -417,9 +433,9 @@ const getClipPaths = (videoId: string, game: string): ClipPaths => {
     const {clips, subtitles, thumbnails} = getDirectoriesForGame(game);
 
     return {
-        clip: `${clips}/${videoId}.mp4`,
-        subtitle: `${subtitles}/${videoId}.srt`,
-        thumbnail: `${thumbnails}/${videoId}.jpg`
+        clip: path.join(clips, `${videoId}.mp4`),
+        subtitle: path.join(subtitles, `${videoId}.srt`),
+        thumbnail: path.join(thumbnails, `${videoId}.jpg`)
     }
 }
 
@@ -560,8 +576,8 @@ const importZip = async (filePath: string, game: string) => {
     // Convert non-mp4 files to mp4 after extraction
     for (const {id, ext} of videoIdList) {
         if (ext !== '.mp4') {
-            const srcPath = `${targetVideoDirectory}/${id}${ext}`;
-            const dstPath = `${targetVideoDirectory}/${id}.mp4`;
+            const srcPath = path.join(targetVideoDirectory, `${id}${ext}`);
+            const dstPath = path.join(targetVideoDirectory, `${id}.mp4`);
             if (fs.existsSync(srcPath)) {
                 try {
                     log.info(`Converting extracted ${ext} to mp4: ${id}`);
@@ -585,24 +601,24 @@ const importZip = async (filePath: string, game: string) => {
             return;
         }
         if (
-            fs.existsSync(`${clipsDirectory}/${videoId}.mp4`) &&
-            fs.existsSync(`${subsDirectory}/${videoId}.srt`)
+            fs.existsSync(path.join(clipsDirectory, `${videoId}.mp4`)) &&
+            fs.existsSync(path.join(subsDirectory, `${videoId}.srt`))
         ) {
             fs.renameSync(
-                `${clipsDirectory}/${videoId}.mp4`,
-                `${clipsDirectory}/_${videoId}.mp4`
+                path.join(clipsDirectory, `${videoId}.mp4`),
+                path.join(clipsDirectory, `_${videoId}.mp4`)
             );
             fs.renameSync(
-                `${subsDirectory}/${videoId}.srt`,
-                `${subsDirectory}/_${videoId}.srt`
+                path.join(subsDirectory, `${videoId}.srt`),
+                path.join(subsDirectory, `_${videoId}.srt`)
             );
         } else {
             log.error('MISMATCHED FILES FOUND');
-            if (fs.existsSync(`${clipsDirectory}/${videoId}.mp4`)) {
-                fs.unlinkSync(`${clipsDirectory}/${videoId}.mp4`);
+            if (fs.existsSync(path.join(clipsDirectory, `${videoId}.mp4`))) {
+                fs.unlinkSync(path.join(clipsDirectory, `${videoId}.mp4`));
             }
-            if (fs.existsSync(`${subsDirectory}/${videoId}.srt`)) {
-                fs.unlinkSync(`${subsDirectory}/${videoId}.srt`);
+            if (fs.existsSync(path.join(subsDirectory, `${videoId}.srt`))) {
+                fs.unlinkSync(path.join(subsDirectory, `${videoId}.srt`));
             }
             mismatchedIds.push(videoId);
         }
@@ -614,7 +630,7 @@ const importZip = async (filePath: string, game: string) => {
         filePath.lastIndexOf('.zip')
     );
 
-    await zip.extract('preview.jpg', `${previewImage}/${collectionId}.jpg`)
+    await zip.extract('preview.jpg', path.join(previewImage, `${collectionId}.jpg`))
     await zip.close();
 
     addToCollection(
@@ -645,7 +661,7 @@ const exportToZip = async (
 
     // Store preview image
     const {previewImage: previewImageDirectory} = getDirectoriesForGame(game);
-    let previewImagePath = `${previewImageDirectory}/${collectionId}.jpg`;
+    let previewImagePath = path.join(previewImageDirectory, `${collectionId}.jpg`);
 
     if (!fs.existsSync(previewImagePath)) {
         previewImagePath = defaultPreviewFilePath;
@@ -1135,6 +1151,8 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
     log.info(`STORING ${title}-${clipNumber} for game ${game} with subtitles ${subtitles}`);
     log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
+    createMediaFolders(game);
+
     const {batchCacheMeta} = getConfigDirectories();
 
     const clip : any = batchCache.clips[0];
@@ -1277,6 +1295,8 @@ ipcMain.handle(
     async (event, { videoSource, subtitles, subtitleObjects, title, clipNumber, game, audioTrackIndex }) => {
         log.info(`STORING ${title}-${clipNumber} for game ${game} with subtitles \n${subtitles}`);
         log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
+
+        createMediaFolders(game);
 
         const id = createClipName(title, clipNumber);
         const {clip: videoFilePath, subtitle: subFilePath, thumbnail: thumbNailPath} = getClipPaths(id, game);
