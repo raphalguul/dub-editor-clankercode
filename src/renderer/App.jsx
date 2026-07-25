@@ -6,7 +6,7 @@ import {
     Navigate,
     useLocation,
 } from 'react-router-dom';
-import { ToastContainer } from 'react-toastify';
+import { ToastContainer, toast } from 'react-toastify';
 
 import AdvancedEditor from './routes/editor/AdvancedEditor';
 import VideoList from './routes/VideoList';
@@ -62,6 +62,33 @@ let App = () => {
 
     useEffect(() => {
         getConfig();
+    }, []);
+
+    useEffect(() => {
+        window.api.onUpdateAvailable((version) => {
+            toast.info(`New version available (v${version}), downloading...`, {
+                autoClose: false,
+                closeOnClick: false,
+            });
+        });
+
+        window.api.onUpdateDownloadProgress((percent) => {
+            toast.info(`Downloading update: ${percent}%`, {
+                autoClose: false,
+                closeOnClick: false,
+            });
+        });
+
+        window.api.onUpdateDownloaded((version) => {
+            toast.success(`Update ready! Restarting in 5 seconds... (v${version})`, {
+                autoClose: false,
+                closeOnClick: false,
+            });
+        });
+
+        window.api.onUpdateError((message) => {
+            toast.error(`Update error: ${message}`);
+        });
     }, []);
 
     const getConfig = async () => {

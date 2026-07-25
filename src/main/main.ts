@@ -75,12 +75,45 @@ const THUMBNAIL_SUB_DIRECTORY =         'ThumbNails';
 const PREVIEW_IMAGE_SUB_DIRECTORY =     'PreviewImages';
 const LOGS_SUBDIRECTORY =               'logs';
 
-export default class AppUpdater {
-    constructor() {
-        log.transports.file.level = 'info';
-        autoUpdater.logger = log;
-        autoUpdater.checkForUpdatesAndNotify();
-    }
+function setupAutoUpdater() {
+    log.transports.file.level = 'info';
+    autoUpdater.logger = log;
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    autoUpdater.on('update-available', (info) => {
+        log.info(`Update available: ${info.version}`);
+        mainWindow?.webContents.send('update-available', info.version);
+    });
+
+    autoUpdater.on('update-not-available', () => {
+        log.info('No update available');
+    });
+
+    autoUpdater.on('download-progress', (progress) => {
+        const pct = Math.round(progress.percent);
+        log.info(`Download progress: ${pct}%`);
+        mainWindow?.webContents.send('update-download-progress', pct);
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+        log.info(`Update downloaded: ${info.version}`);
+        mainWindow?.webContents.send('update-downloaded', info.version);
+        setTimeout(() => {
+            autoUpdater.quitAndInstall(false, true);
+        }, 5000);
+    });
+
+    autoUpdater.on('error', (err) => {
+        log.error('Auto-updater error:', err);
+        mainWindow?.webContents.send('update-error', err.message);
+    });
+
+    setTimeout(() => {
+        autoUpdater.checkForUpdates().catch((err) => {
+            log.error('Failed to check for updates:', err);
+        });
+    }, 3000);
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -1012,6 +1045,7 @@ app.whenReady()
             }
         });
         createWindow();
+        setupAutoUpdater();
         app.on('activate', () => {
             if (mainWindow === null) createWindow();
         });

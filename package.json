@@ -1,6 +1,6 @@
 {
     "description": "An application for creating and managing clips for What the Dub and Rifftrax",
-    "version": "2.0.1",
+    "version": "2.0.2",
     "keywords": [
         "electron",
         "boilerplate",
@@ -226,7 +226,11 @@
             "./node_modules/ffprobe-static/**",
             "./images/*"
         ],
-        "publish": null
+        "publish": {
+            "provider": "github",
+            "owner": "raphalguul",
+            "repo": "dub-editor-clankercode"
+        }
     },
     "collective": {
         "url": "https://opencollective.com/electron-react-boilerplate-594"

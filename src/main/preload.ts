@@ -43,7 +43,8 @@ contextBridge.exposeInMainWorld('api', {
             'normalizeAudio',
             'normalizeCollection',
             'transcribeAudio',
-            'log'
+            'log',
+            'check-for-update'
         ];
         if (validChannels.includes(channel)) {
             return await ipcRenderer.invoke(channel, args);
@@ -62,5 +63,17 @@ contextBridge.exposeInMainWorld('api', {
     },
     removeRemuxProgressListener: () => {
         ipcRenderer.removeAllListeners('remuxProgress');
+    },
+    onUpdateAvailable: (callback: (version: string) => void) => {
+        ipcRenderer.on('update-available', (_event, version) => callback(version));
+    },
+    onUpdateDownloadProgress: (callback: (percent: number) => void) => {
+        ipcRenderer.on('update-download-progress', (_event, percent) => callback(percent));
+    },
+    onUpdateDownloaded: (callback: (version: string) => void) => {
+        ipcRenderer.on('update-downloaded', (_event, version) => callback(version));
+    },
+    onUpdateError: (callback: (message: string) => void) => {
+        ipcRenderer.on('update-error', (_event, message) => callback(message));
     },
 });
