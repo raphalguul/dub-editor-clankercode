@@ -189,6 +189,7 @@ export default (props) => {
                         }}
                     >
                         <track
+                            key={props.trackKey}
                             label="English"
                             kind="subtitles"
                             srcLang="en"
@@ -257,6 +258,7 @@ export default (props) => {
                     }}
                 >
                     <track
+                        key={props.trackKey}
                         label="English"
                         kind="subtitles"
                         srclang="en"

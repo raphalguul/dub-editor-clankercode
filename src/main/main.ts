@@ -204,16 +204,6 @@ const defaultCollections: any = {
 };
 let collections: { [key: string]: any } = defaultCollections;
 
-const convertMillisecondsToTimestamp = (milliseconds: number) => {
-    const seconds = milliseconds / 1000;
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds - Math.trunc(seconds)) * 1000);
-
-    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
-}
-
 const createMediaFolders = (game: string) => {
     if (!config?.mediaDirectory) {
         return;
@@ -231,15 +221,15 @@ const processVideo = (inputFilePath: string, outputFilePath: string, startTime: 
     return new Promise((resolve, reject) => {
         log.info("PROCESSING " + inputFilePath);
         log.info("STORING TO " + outputFilePath);
-        const ts = convertMillisecondsToTimestamp(startTime);
         let cmd = ffmpeg(inputFilePath)
             .videoCodec("libx264")
             .audioCodec("aac")
             .audioBitrate("192k")
             .audioChannels(2)
             .audioFrequency(44100)
+            .seekInput(startTime / 1000)
             .setDuration(duration / 1000)
-            .outputOptions(['-ss', ts, '-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']);
+            .outputOptions(['-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']);
 
         const outputOpts: string[] = [];
         if (audioTrackIndex !== undefined) {

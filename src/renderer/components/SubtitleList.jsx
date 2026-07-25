@@ -294,6 +294,22 @@ export default ({
                             >
                                 Set at Play Head
                             </button>
+                            <button
+                                title="Set start to video start"
+                                onClick={() => {
+                                    onSubsChange(
+                                        'edit',
+                                        {
+                                            ...currentSubObject,
+                                            startTime: 0,
+                                        },
+                                        currentSub
+                                    );
+                                }}
+                                disabled={!currentSubObject}
+                            >
+                                Set Start to Video Start
+                            </button>
                         </td>
                     </tr>
                     <tr>
@@ -322,6 +338,22 @@ export default ({
                                 disabled={!currentSubObject}
                             >
                                 Set at Play Head
+                            </button>
+                            <button
+                                title="Set end to video end"
+                                onClick={() => {
+                                    onSubsChange(
+                                        'edit',
+                                        {
+                                            ...currentSubObject,
+                                            endTime: videoLength * 1000,
+                                        },
+                                        currentSub
+                                    );
+                                }}
+                                disabled={!currentSubObject}
+                            >
+                                Set End to Video End
                             </button>
                         </td>
                     </tr>

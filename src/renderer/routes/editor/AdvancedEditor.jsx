@@ -50,6 +50,7 @@ let AdvancedEditor = () => {
     const [substitution] = useState('');
     const [, setButtonsDisabled] = useState(false);
     const [playerKey, setPlayerKey] = useState(0);
+    const [trackKey, setTrackKey] = useState(0);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentPosition, setCurrentPosition] = useState(0);
@@ -57,7 +58,6 @@ let AdvancedEditor = () => {
     const [currentRow, setCurrentRow] = useState(0);
 
     const [videoLength, setVideoLength] = useState(0);
-    const [actualVideoLength, setActualVideoLength] = useState(0);
 
     let videoLengthMs = videoLength * 1000;
     let defaultClipSize = 8000; // 8 seconds
@@ -93,7 +93,6 @@ let AdvancedEditor = () => {
         defaultClipSize,
         videoLength,
         offset,
-        actualVideoLength,
     };
     const keyboardHandler = useCallback((event) => {
         if (isActiveElementInput()) {
@@ -501,8 +500,8 @@ let AdvancedEditor = () => {
     let scrub = (milliseconds) => {
         if (milliseconds < Math.max(0, stateRef.current.offset)) {
             milliseconds = Math.max(0, stateRef.current.offset);
-        } else if (milliseconds > stateRef.current.actualVideoLength * 1000) {
-            milliseconds = stateRef.current.videoLength * 1000;
+        } else if (milliseconds > stateRef.current.offset + stateRef.current.videoLength * 1000) {
+            milliseconds = stateRef.current.offset + stateRef.current.videoLength * 1000;
         }
 
         console.log('SCRUB TO ' + milliseconds);
@@ -639,6 +638,7 @@ let AdvancedEditor = () => {
                 newSubs.sort((a, b) => a.startTime - b.startTime).map((s, i) => ({ ...s, index: i }))
             );
             setSubs(distributed);
+            setTrackKey((k) => k + 1);
             if (distributed.length > 0) {
                 setCurrentSub(0);
             }
@@ -682,9 +682,11 @@ let AdvancedEditor = () => {
                 sub.startTime = 0;
                 sub.endTime = sub.startTime + subLength;
             }
-            if (sub.endTime > stateRef.current.videoLength * 1000) {
-                sub.endTime = stateRef.current.videoLength * 1000;
-                sub.startTime = sub.endTime - subLength;
+            let videoEndMs = stateRef.current.videoLength * 1000;
+            if (sub.endTime > videoEndMs) {
+                sub.endTime = videoEndMs;
+            } else if (videoEndMs - sub.endTime < 100) {
+                sub.endTime = videoEndMs;
             }
             let subList = [...stateRef.current.subs];
             subList[sub.index] = sub;
@@ -732,6 +734,7 @@ let AdvancedEditor = () => {
                     <div className="top-pane">
                         <WhatTheDubPlayer
                             key={playerKey}
+                            trackKey={trackKey}
                             width="100%"
                             videoSource={playbackSource}
                             isPlaying={
@@ -762,7 +765,6 @@ let AdvancedEditor = () => {
                                 if (!videoLength) {
                                     setVideoLength(video.duration);
                                 }
-                                setActualVideoLength(video.duration);
                                 const config = await ConfigAPI.getConfig();
                                 if (config.fixSubsOnLoad !== false && !isBatch) {
                                     fixSubs(video.duration * 1000);
