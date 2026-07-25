@@ -238,9 +238,8 @@ const processVideo = (inputFilePath: string, outputFilePath: string, startTime: 
             .audioBitrate("192k")
             .audioChannels(2)
             .audioFrequency(44100)
-            .setStartTime(ts)
             .setDuration(duration / 1000)
-            .outputOptions(['-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']);
+            .outputOptions(['-ss', ts, '-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']);
 
         const outputOpts: string[] = [];
         if (audioTrackIndex !== undefined) {
@@ -1640,6 +1639,19 @@ ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConf
     );
 
     return { results };
+});
+
+ipcMain.handle('check-for-update', async () => {
+    try {
+        const result = await autoUpdater.checkForUpdates();
+        if (!result || !result.updateInfo) {
+            mainWindow?.webContents.send('update-not-available');
+        }
+        return result?.updateInfo?.version ?? null;
+    } catch (err) {
+        log.error('Manual update check failed:', err);
+        return null;
+    }
 });
 
 ipcMain.handle('log', (event, msg) => {

@@ -76,4 +76,7 @@ contextBridge.exposeInMainWorld('api', {
     onUpdateError: (callback: (message: string) => void) => {
         ipcRenderer.on('update-error', (_event, message) => callback(message));
     },
+    onUpdateNotAvailable: (callback: () => void) => {
+        ipcRenderer.on('update-not-available', () => callback());
+    },
 });

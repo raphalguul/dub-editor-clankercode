@@ -764,7 +764,7 @@ let AdvancedEditor = () => {
                                 }
                                 setActualVideoLength(video.duration);
                                 const config = await ConfigAPI.getConfig();
-                                if (config.fixSubsOnLoad !== false) {
+                                if (config.fixSubsOnLoad !== false && !isBatch) {
                                     fixSubs(video.duration * 1000);
                                 }
                             }}

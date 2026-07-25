@@ -89,6 +89,10 @@ let App = () => {
         window.api.onUpdateError((message) => {
             toast.error(`Update error: ${message}`);
         });
+
+        window.api.onUpdateNotAvailable(() => {
+            toast.info('No updates available');
+        });
     }, []);
 
     const getConfig = async () => {
@@ -223,6 +227,16 @@ let App = () => {
                         >
                             About
                         </Link>
+                        |
+                        <a
+                            href="#"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                window.api.send('check-for-update');
+                            }}
+                        >
+                            Update
+                        </a>
                         |
                         <a
                             href="https://ko-fi.com/michaelcmain52278"
