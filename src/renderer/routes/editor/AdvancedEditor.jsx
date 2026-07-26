@@ -558,9 +558,17 @@ let AdvancedEditor = () => {
 
         try {
             setButtonsDisabled(true);
+            const adjustedSubs = [...subs];
+            if (adjustedSubs.length > 0) {
+                const lastSub = adjustedSubs[adjustedSubs.length - 1];
+                const clipDurationMs = videoLength * 1000;
+                if (lastSub.type === 'dynamic' && (clipDurationMs - lastSub.endTime) <= 80) {
+                    adjustedSubs[adjustedSubs.length - 1] = { ...lastSub, endTime: clipDurationMs + 50 };
+                }
+            }
             let videoId = await addVideo(
                 videoSource,
-                subs,
+                adjustedSubs,
                 videoName,
                 clipNumber,
                 params.type,
