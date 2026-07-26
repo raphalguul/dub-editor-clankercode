@@ -65,33 +65,11 @@ let App = () => {
     }, []);
 
     useEffect(() => {
-        window.api.onUpdateAvailable((version) => {
-            toast.info(`New version available (v${version}), downloading...`, {
-                autoClose: false,
-                closeOnClick: false,
-            });
-        });
-
         window.api.onUpdateDownloadProgress((percent) => {
             toast.info(`Downloading update: ${percent}%`, {
                 autoClose: false,
                 closeOnClick: false,
             });
-        });
-
-        window.api.onUpdateDownloaded((version) => {
-            toast.success(`Update ready! Restarting in 5 seconds... (v${version})`, {
-                autoClose: false,
-                closeOnClick: false,
-            });
-        });
-
-        window.api.onUpdateError((message) => {
-            toast.error(`Update error: ${message}`);
-        });
-
-        window.api.onUpdateNotAvailable(() => {
-            toast.info('No updates available');
         });
     }, []);
 

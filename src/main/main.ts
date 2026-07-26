@@ -78,42 +78,88 @@ const LOGS_SUBDIRECTORY =               'logs';
 function setupAutoUpdater() {
     log.transports.file.level = 'info';
     autoUpdater.logger = log;
-    autoUpdater.autoDownload = true;
+    autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
+}
 
-    autoUpdater.on('update-available', (info) => {
-        log.info(`Update available: ${info.version}`);
-        mainWindow?.webContents.send('update-available', info.version);
-    });
+function checkForUpdatesAndPrompt(isStartup: boolean) {
+    return new Promise<void>((resolve) => {
+        let handled = false;
 
-    autoUpdater.on('update-not-available', () => {
-        log.info('No update available');
-    });
+        const cleanup = () => {
+            autoUpdater.removeAllListeners('update-available');
+            autoUpdater.removeAllListeners('update-not-available');
+            autoUpdater.removeAllListeners('error');
+        };
 
-    autoUpdater.on('download-progress', (progress) => {
-        const pct = Math.round(progress.percent);
-        log.info(`Download progress: ${pct}%`);
-        mainWindow?.webContents.send('update-download-progress', pct);
-    });
+        autoUpdater.once('update-available', async (info: any) => {
+            if (handled) return;
+            handled = true;
+            log.info(`Update available: ${info.version}`);
 
-    autoUpdater.on('update-downloaded', (info) => {
-        log.info(`Update downloaded: ${info.version}`);
-        mainWindow?.webContents.send('update-downloaded', info.version);
-        setTimeout(() => {
-            autoUpdater.quitAndInstall(false, true);
-        }, 5000);
-    });
+            const result = await dialog.showMessageBox(mainWindow!, {
+                type: 'info',
+                message: `A new version (v${info.version}) is available.`,
+                detail: 'Do you want to download and install it?',
+                buttons: ['Update', 'Later'],
+                defaultId: 0,
+                cancelId: 1,
+            });
 
-    autoUpdater.on('error', (err) => {
-        log.error('Auto-updater error:', err);
-        mainWindow?.webContents.send('update-error', err.message);
-    });
+            if (result.response === 0) {
+                autoUpdater.once('update-downloaded', async (dlInfo: any) => {
+                    log.info(`Update downloaded: ${dlInfo.version}`);
+                    const restartResult = await dialog.showMessageBox(mainWindow!, {
+                        type: 'info',
+                        message: `Update downloaded (v${dlInfo.version}).`,
+                        detail: 'Do you want to restart now?',
+                        buttons: ['Restart', 'Later'],
+                        defaultId: 0,
+                        cancelId: 1,
+                    });
+                    if (restartResult.response === 0) {
+                        autoUpdater.quitAndInstall(false, true);
+                    }
+                });
+                autoUpdater.downloadUpdate();
+            }
 
-    setTimeout(() => {
+            cleanup();
+            resolve();
+        });
+
+        autoUpdater.once('update-not-available', async () => {
+            if (handled) return;
+            handled = true;
+            log.info('No update available');
+
+            if (!isStartup) {
+                await dialog.showMessageBox(mainWindow!, {
+                    type: 'info',
+                    message: 'No updates available.',
+                    detail: 'You are running the latest version.',
+                    buttons: ['OK'],
+                });
+            }
+
+            cleanup();
+            resolve();
+        });
+
+        autoUpdater.once('error', async (err: Error) => {
+            if (handled) return;
+            handled = true;
+            log.error('Update check error:', err);
+            cleanup();
+            resolve();
+        });
+
         autoUpdater.checkForUpdates().catch((err) => {
             log.error('Failed to check for updates:', err);
+            cleanup();
+            resolve();
         });
-    }, 3000);
+    });
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -898,6 +944,10 @@ const createWindow = async () => {
         }
 
         // mainWindow.webContents.openDevTools();
+
+        setTimeout(() => {
+            checkForUpdatesAndPrompt(true);
+        }, 3000);
     });
 
     mainWindow.on('closed', () => {
@@ -1652,16 +1702,7 @@ ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConf
 });
 
 ipcMain.handle('check-for-update', async () => {
-    try {
-        const result = await autoUpdater.checkForUpdates();
-        if (!result || !result.updateInfo) {
-            mainWindow?.webContents.send('update-not-available');
-        }
-        return result?.updateInfo?.version ?? null;
-    } catch (err) {
-        log.error('Manual update check failed:', err);
-        return null;
-    }
+    await checkForUpdatesAndPrompt(false);
 });
 
 ipcMain.handle('log', (event, msg) => {
