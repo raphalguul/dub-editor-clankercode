@@ -308,7 +308,7 @@ export default ({
                                 }}
                                 disabled={!currentSubObject}
                             >
-                                Set Start to Video Start
+                                ⇤
                             </button>
                         </td>
                     </tr>
@@ -353,7 +353,7 @@ export default ({
                                             }}
                                 disabled={!currentSubObject}
                             >
-                                Set End to Video End
+                                ⇥
                             </button>
                         </td>
                     </tr>
