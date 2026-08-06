@@ -40,8 +40,8 @@ const getAudioTracks = async (videoPath) => {
     return await window.api.send('getAudioTracks', videoPath);
 };
 
-const remuxForPlayback = async (videoSource, audioTrackIndex) => {
-    return await window.api.send('remuxForPlayback', { videoSource, audioTrackIndex });
+const remuxForPlayback = async (videoSource, audioTrackIndex, forceReencode) => {
+    return await window.api.send('remuxForPlayback', { videoSource, audioTrackIndex, forceReencode });
 };
 
 const cleanupTempFile = async (tempPath) => {

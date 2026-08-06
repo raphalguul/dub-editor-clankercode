@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { Link } from 'react-router-dom';
+import { toast } from 'react-toastify';
 
 import WhatTheDubPlayer from '../../components/WhatTheDubPlayer';
 import TimeLine from '../../components/TimeLine';
@@ -41,6 +42,7 @@ let ClipCutter = () => {
 
     const [videoLength, setVideoLength] = useState(0);
     const [clipName, setClipName] = useState('');
+    const [forceReencode, setForceReencode] = useState(false);
 
     let videoLengthMs = videoLength * 1000;
     let defaultClipSize = 8000; // 8 seconds
@@ -266,7 +268,7 @@ let ClipCutter = () => {
         }
 
         let playSource;
-        if (canPlayDirect(source, mediaInfo, selectedTrack)) {
+        if (!forceReencode && canPlayDirect(source, mediaInfo, selectedTrack)) {
             playSource = source;
         } else {
             setInterstitialState({ isOpen: true, message: 'Preparing video for playback...' });
@@ -274,10 +276,11 @@ let ClipCutter = () => {
                 setInterstitialState({ isOpen: true, message: `Preparing video for playback... ${pct}%` });
             });
             try {
-                playSource = await VideoAPI.remuxForPlayback(source, selectedTrack);
+                playSource = await VideoAPI.remuxForPlayback(source, selectedTrack, forceReencode);
             } catch (err) {
                 console.error('Remux failed, using original:', err);
                 playSource = source;
+                toast.error('Remux failed, playing original video');
             }
             VideoAPI.removeRemuxProgressListener();
             setInterstitialState({ isOpen: false, message: '' });
@@ -428,7 +431,8 @@ let ClipCutter = () => {
                                         clips,
                                         videoSource,
                                         title,
-                                        selectedAudioTrack
+                                        selectedAudioTrack,
+                                        forceReencode
                                     ),
                                     (isOpen) => {
                                         setInterstitialState({
@@ -464,6 +468,16 @@ let ClipCutter = () => {
                         Please choose the video you wish to create clips from.
                     </p>
                     <button onClick={onFileOpen}>Open Video</button>
+                    <label style={{ marginLeft: '10px', fontSize: '0.85rem' }}>
+                        <input
+                            type="checkbox"
+                            checked={forceReencode}
+                            onChange={({ target: { checked } }) =>
+                                setForceReencode(checked)
+                            }
+                        />
+                        {' '}Force re-encode (use if video shows decode errors)
+                    </label>
                     <Link to="/">
                         <button type="button">Cancel</button>
                     </Link>

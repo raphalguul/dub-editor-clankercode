@@ -29,6 +29,7 @@ type Config = {
     whisperCudaFallbackCpu: boolean;
     whisperSuppressSilence: boolean;
     autoIncrementClipNumber: boolean;
+    hardwareVideoDecode: boolean;
 };
 
 const defaultConfig: Config = {
@@ -62,6 +63,7 @@ const defaultConfig: Config = {
     whisperCudaFallbackCpu: true,
     whisperSuppressSilence: true,
     autoIncrementClipNumber: true,
+    hardwareVideoDecode: true,
 };
 
 export default defaultConfig;

@@ -11,6 +11,8 @@ export default (props) => {
     const currentIndexRef = useRef(-1);
     const intervalRef = useRef(null);
     const shouldMuteRef = useRef(false);
+    const retryCountRef = useRef(0);
+    const lastGoodPosRef = useRef(0);
     const subsRef = useRef(props.subs);
     subsRef.current = props.subs;
 
@@ -32,10 +34,55 @@ export default (props) => {
         if (videoElement.current) {
             videoElement.current.currentTime = props.videoPosition;
         }
+        lastGoodPosRef.current = props.videoPosition;
         isTalking = false;
         setMuted(false);
         currentIndexRef.current = -1;
     }, [props.videoPosition, props.seekKey]);
+
+    useEffect(() => {
+        retryCountRef.current = 0;
+        setVideoError(null);
+    }, [props.videoSource]);
+
+    const handleVideoError = (e) => {
+        const ve = e.target;
+        const err = ve?.error;
+        const msg = err ? `code=${err.code} message=${err.message}` : 'unknown error';
+        window.api.send('log', 'WTD: error ' + msg);
+        setLoading(false);
+        if (retryCountRef.current < 2) {
+            retryCountRef.current++;
+            setVideoError(null);
+            const el = document.getElementById('videoElement');
+            if (el) {
+                try {
+                    const target =
+                        lastGoodPosRef.current > 0
+                            ? lastGoodPosRef.current
+                            : 0;
+                    const retryLoad = () => {
+                        try {
+                            el.currentTime = Math.max(0, target - 0.1);
+                        } catch {}
+                        if (props.isPlaying) {
+                            const promise = el.play();
+                            if (promise !== undefined) promise.catch(() => {});
+                        }
+                    };
+                    el.addEventListener('loadedmetadata', retryLoad, {
+                        once: true,
+                    });
+                    el.load();
+                } catch (recoveryErr) {
+                    console.error('Video recovery failed:', recoveryErr);
+                    setVideoError(msg);
+                }
+            }
+        } else {
+            setVideoError(msg);
+        }
+    };
 
     useEffect(() => {
         if (!videoElement.current) return;
@@ -87,6 +134,7 @@ export default (props) => {
 
         const subs = subsRef.current;
 
+        lastGoodPosRef.current = video.currentTime;
         props.onVideoPositionChange(video.currentTime);
         let index = subs.findIndex((subtitle) => {
             return (
@@ -175,14 +223,7 @@ export default (props) => {
                         onCanPlay={() => { window.api.send('log', 'WTD: canPlay'); setLoading(false); }}
                         onWaiting={() => window.api.send('log', 'WTD: waiting')}
                         onStalled={() => window.api.send('log', 'WTD: stalled')}
-                        onError={(e) => {
-                            const ve = e.target;
-                            const err = ve?.error;
-                            const msg = err ? `code=${err.code} message=${err.message}` : 'unknown error';
-                            window.api.send('log', 'WTD: error ' + msg);
-                            setVideoError(msg);
-                            setLoading(false);
-                        }}
+                        onError={handleVideoError}
                         controls={props.controls}
                         onCanPlayThrough={() => {
                             props.onVideoLoaded(videoElement.current);
@@ -244,14 +285,7 @@ export default (props) => {
                     onCanPlay={() => { window.api.send('log', 'WTD: canPlay2'); setLoading(false); }}
                     onWaiting={() => window.api.send('log', 'WTD: waiting2')}
                     onStalled={() => window.api.send('log', 'WTD: stalled2')}
-                    onError={(e) => {
-                        const ve = e.target;
-                        const err = ve?.error;
-                        const msg = err ? `code=${err.code} message=${err.message}` : 'unknown error';
-                        window.api.send('log', 'WTD: error ' + msg);
-                        setVideoError(msg);
-                        setLoading(false);
-                    }}
+                    onError={handleVideoError}
                     controls={props.controls}
                     onCanPlayThrough={() => {
                         props.onVideoLoaded(videoElement.current);

@@ -45,6 +45,18 @@ const FIXSUBS_HELP_TEXT = (
     </>
 );
 
+const HARDWARE_DECODE_HELP = (
+    <>
+        <h4>Hardware Video Decode</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            Uses your GPU to decode video during playback. Turn this off only if
+            you see decode errors or video glitches (some files with irregular
+            timestamps fail on hardware decoders). Requires an app restart to
+            take effect.
+        </p>
+    </>
+);
+
 const NORMALIZE_FINALIZE_HELP = (
     <>
         <h4>Normalize Audio on Finalize</h4>
@@ -317,6 +329,11 @@ const Config = (props) => {
                     'Auto-increment clip number on duplicate',
                     'autoIncrementClipNumber',
                     AUTO_INCREMENT_HELP_TEXT
+                )}
+                {checkboxRow(
+                    'Hardware Video Decode',
+                    'hardwareVideoDecode',
+                    HARDWARE_DECODE_HELP
                 )}
             </tbody>
         </table>

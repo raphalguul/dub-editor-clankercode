@@ -235,12 +235,13 @@ function getEncoder(): Promise<string> {
     });
 }
 
-function getCacheKey(filePath: string, trackIndex: number): string {
+function getCacheKey(filePath: string, trackIndex: number, forceReencode?: boolean): string {
+    const variant = forceReencode ? 'reencode' : 'copy';
     try {
         const stat = fs.statSync(filePath);
-        return crypto.createHash('md5').update(`${filePath}|${trackIndex}|${stat.mtimeMs}`).digest('hex');
+        return crypto.createHash('md5').update(`${filePath}|${trackIndex}|${variant}|${stat.mtimeMs}`).digest('hex');
     } catch {
-        return crypto.createHash('md5').update(`${filePath}|${trackIndex}`).digest('hex');
+        return crypto.createHash('md5').update(`${filePath}|${trackIndex}|${variant}`).digest('hex');
     }
 }
 
@@ -1012,10 +1013,26 @@ function serveFile(filePath: string, mime: string, rangeHeader: string | null): 
     if (rangeHeader) {
         const match = rangeHeader.replace(/bytes=/, '').match(/(\d*)-(\d*)/);
         if (match) {
-            let start = parseInt(match[1], 10);
-            let end = parseInt(match[2], 10);
-            if (isNaN(start)) { start = Math.max(0, fileSize + start); end = fileSize - 1; }
-            else { if (isNaN(end) || end >= fileSize) end = Math.min(fileSize - 1, start + MAX_CHUNK - 1); }
+            const startStr = match[1];
+            const endStr = match[2];
+            let start: number;
+            let end: number;
+            if (startStr === '') {
+                // Suffix range: bytes=-N (read last N bytes)
+                const suffix = parseInt(endStr, 10) || 0;
+                start = Math.max(0, fileSize - suffix);
+                end = fileSize - 1;
+            } else {
+                start = parseInt(startStr, 10);
+                if (isNaN(start) || start < 0) { start = 0; }
+                if (endStr === '' || isNaN(parseInt(endStr, 10))) {
+                    end = Math.min(fileSize - 1, start + MAX_CHUNK - 1);
+                } else {
+                    end = parseInt(endStr, 10);
+                    if (end >= fileSize) { end = fileSize - 1; }
+                }
+            }
+            if (start > end) { start = end; }
             const chunkSize = end - start + 1;
             const buf = Buffer.alloc(chunkSize);
             const fd = fs.openSync(filePath, 'r');
@@ -1050,6 +1067,11 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,MojoMediaAudioDecoder,PlatformAudioDecoder');
+
+if (config.hardwareVideoDecode === false) {
+    log.info('Hardware video decode disabled by config');
+    app.commandLine.appendSwitch('disable-accelerated-video-decode');
+}
 
 app.whenReady()
     .then(() => {
@@ -1165,13 +1187,14 @@ ipcMain.handle('getConfig', () => {
     return config;
 });
 
-ipcMain.handle('storeBatch', async (event, { clips, video, title, audioTrackIndex }) => {
+ipcMain.handle('storeBatch', async (event, { clips, video, title, audioTrackIndex, forceReencode }) => {
     batchCache = {
         video,
         title,
         clipNumber: 1,
         clips,
         audioTrackIndex,
+        forceReencode,
     };
 
     const {batchCacheMeta} = getConfigDirectories();
@@ -1194,6 +1217,7 @@ ipcMain.handle('nextBatchClip', (_event) => {
         clip: batchCache.clips[0],
         video: batchCache.video,
         audioTrackIndex: batchCache.audioTrackIndex,
+        forceReencode: batchCache.forceReencode,
     };
 });
 
@@ -1732,11 +1756,11 @@ ipcMain.handle('getAudioTracks', async (event, videoSource) => {
     return info;
 });
 
-ipcMain.handle('remuxForPlayback', async (event, { videoSource, audioTrackIndex }) => {
+ipcMain.handle('remuxForPlayback', async (event, { videoSource, audioTrackIndex, forceReencode }) => {
     let resolvedPath = videoSource;
     if (resolvedPath.startsWith('localfile://')) { resolvedPath = fromLocalfileUrl(resolvedPath); }
     if (!fs.existsSync(resolvedPath)) { throw new Error('Video file not found'); }
-    const cacheKey = getCacheKey(resolvedPath, audioTrackIndex);
+    const cacheKey = getCacheKey(resolvedPath, audioTrackIndex, forceReencode);
     const cachedFile = path.join(CACHE_DIR, cacheKey + '.mp4');
     if (fs.existsSync(cachedFile)) {
         try {
@@ -1745,7 +1769,7 @@ ipcMain.handle('remuxForPlayback', async (event, { videoSource, audioTrackIndex 
             fs.readSync(fd, buf, 0, 8, 4);
             fs.closeSync(fd);
             if (buf.readUInt32BE(0) === 0x66747970) {
-                log.info('Cache hit for ' + resolvedPath + ' track ' + audioTrackIndex);
+                log.info('Cache hit for ' + resolvedPath + ' track ' + audioTrackIndex + (forceReencode ? ' (reencoded)' : ''));
                 return `localfile:///${cachedFile.replace(/\\/g, '/')}`;
             }
         } catch {}
@@ -1760,8 +1784,8 @@ ipcMain.handle('remuxForPlayback', async (event, { videoSource, audioTrackIndex 
     const needAudioReencode = !compatibleAudioCodecs.includes(audioCodec);
     const compatibleVideoCodecs = ['h264', 'hevc', 'vp8', 'vp9', 'av1'];
     const isH264_8bit = probeData.videoCodec === 'h264' && (probeData.videoPixFmt === 'yuv420p' || probeData.videoPixFmt === 'yuvj420p');
-    const needVideoReencode = !probeData.videoCodec || !compatibleVideoCodecs.includes(probeData.videoCodec) || (probeData.videoCodec === 'h264' && !isH264_8bit);
-    log.info('REMUX DECISION: vcodec=' + probeData.videoCodec + ' pix=' + probeData.videoPixFmt + ' audio=' + audioCodec + ' video=' + (needVideoReencode ? 'reencode' : 'copy') + ' audio=' + (needAudioReencode ? 'reencode' : 'copy'));
+    const needVideoReencode = forceReencode || !probeData.videoCodec || !compatibleVideoCodecs.includes(probeData.videoCodec) || (probeData.videoCodec === 'h264' && !isH264_8bit);
+    log.info('REMUX DECISION: vcodec=' + probeData.videoCodec + ' pix=' + probeData.videoPixFmt + ' audio=' + audioCodec + ' video=' + (needVideoReencode ? 'reencode' : 'copy') + ' audio=' + (needAudioReencode ? 'reencode' : 'copy') + (forceReencode ? ' (forced re-encode)' : ''));
     if (!fs.existsSync(CACHE_DIR)) { fs.mkdirSync(CACHE_DIR, { recursive: true }); }
     const convPath = cachedFile + '.conv';
     log.info('Remuxing for playback: track ' + audioTrackIndex + ' from ' + resolvedPath

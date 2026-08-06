@@ -393,7 +393,7 @@ let AdvancedEditor = () => {
                 });
             }
         );
-        let { clip, video, title, clipNumber, audioTrackIndex } = batchClip;
+        let { clip, video, title, clipNumber, audioTrackIndex, forceReencode } = batchClip;
 
         const config = await ConfigAPI.getConfig();
         if (config.autoIncrementClipNumber !== false) {
@@ -412,7 +412,7 @@ let AdvancedEditor = () => {
         let track = audioTrackIndex !== undefined ? audioTrackIndex : firstAudioIndex;
 
         let playSource;
-        if (canPlayDirect(video, mediaInfo, track)) {
+        if (!forceReencode && canPlayDirect(video, mediaInfo, track)) {
             playSource = video;
         } else {
             setInterstitialState({ isOpen: true, message: 'Preparing video for playback...' });
@@ -420,10 +420,11 @@ let AdvancedEditor = () => {
                 setInterstitialState({ isOpen: true, message: `Preparing video for playback... ${pct}%` });
             });
             try {
-                playSource = await VideoAPI.remuxForPlayback(video, track);
+                playSource = await VideoAPI.remuxForPlayback(video, track, forceReencode);
             } catch (err) {
                 console.error('Remux failed, using original:', err);
                 playSource = video;
+                toast.error('Remux failed, playing original video');
             }
             VideoAPI.removeRemuxProgressListener();
             setInterstitialState({ isOpen: false, message: '' });
