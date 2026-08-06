@@ -1,6 +1,6 @@
 {
     "description": "An application for creating and managing clips for What the Dub and Rifftrax",
-    "version": "2.1.1",
+    "version": "2.1.2",
     "keywords": [
         "electron",
         "boilerplate",
