@@ -141,10 +141,14 @@ export let convertSubtitlesToWebVtt = (subtitles, substitution, offset = 0) => {
 };
 
 export let createWebVttDataUri = (subtitles, substitution, offset = 0) => {
-    return (
-        'data:text/vtt;base64,' +
-        btoa(convertSubtitlesToWebVtt(subtitles, substitution, offset))
+    const bytes = new TextEncoder().encode(
+        convertSubtitlesToWebVtt(subtitles, substitution, offset)
     );
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return 'data:text/vtt;base64,' + btoa(binary);
 };
 
 export let addVideo = async (

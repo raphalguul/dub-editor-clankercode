@@ -30,6 +30,12 @@ export default (props) => {
         );
     });
 
+    const vttSrc = createWebVttDataUri(
+        props.subs,
+        props.substitution,
+        props.offset
+    );
+
     useEffect(() => {
         if (videoElement.current) {
             videoElement.current.currentTime = props.videoPosition;
@@ -183,6 +189,16 @@ export default (props) => {
         };
     }, [props.isPlaying, props.subs]);
 
+    useEffect(() => {
+        const video = videoElement.current;
+        if (!video || !video.textTracks) return;
+        for (let i = 0; i < video.textTracks.length; i++) {
+            if (video.textTracks[i].kind === 'subtitles') {
+                video.textTracks[i].mode = 'showing';
+            }
+        }
+    }, [vttSrc]);
+
     if (props.width) {
         return (
             <div
@@ -230,15 +246,11 @@ export default (props) => {
                         }}
                     >
                         <track
-                            key={props.trackKey}
+                            key={`${props.trackKey}|${vttSrc}`}
                             label="English"
                             kind="subtitles"
                             srcLang="en"
-                            src={createWebVttDataUri(
-                                props.subs,
-                                props.substitution,
-                                props.offset
-                            )}
+                            src={vttSrc}
                             default
                         ></track>
                     </video>
@@ -292,15 +304,11 @@ export default (props) => {
                     }}
                 >
                     <track
-                        key={props.trackKey}
+                        key={`${props.trackKey}|${vttSrc}`}
                         label="English"
                         kind="subtitles"
                         srclang="en"
-                        src={createWebVttDataUri(
-                            props.subs,
-                            props.substitution,
-                            props.offset
-                        )}
+                        src={vttSrc}
                         default
                     ></track>
                 </video>
