@@ -467,7 +467,13 @@ let ClipCutter = () => {
                     <p>
                         Please choose the video you wish to create clips from.
                     </p>
+                    <p>
                     <button onClick={onFileOpen}>Open Video</button>
+                    <Link to="/">
+                        <button type="button">Cancel</button>
+                    </Link>
+                    </p>
+                    <p>
                     <label style={{ marginLeft: '10px', fontSize: '0.85rem' }}>
                         <input
                             type="checkbox"
@@ -478,9 +484,7 @@ let ClipCutter = () => {
                         />
                         {' '}Force re-encode (use if video shows decode errors)
                     </label>
-                    <Link to="/">
-                        <button type="button">Cancel</button>
-                    </Link>
+                    </p>
                 </div>
             )}
         </div>
