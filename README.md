@@ -61,7 +61,7 @@ From here it depends if you have already trimmed a video file to the exact lengt
 - Click Back to Collection List
 - Click Export next to the pack you just edited
 
-Once you select the export destination, Dub Editor will create a zip file with all the files required by the workshop. Export these files into an empty (!)folder, then start What the Dub and point the workshop uploader to this folder.
+Once you select the export destination, Dub Editor will create a zip file with all the files required by the workshop. Export these files into an empty (!) folder, then start What the Dub and point the workshop uploader to this folder.
 
 ## Keyboard Shortcuts
 
