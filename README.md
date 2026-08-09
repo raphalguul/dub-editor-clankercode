@@ -1,6 +1,6 @@
 ## What is Dub Editor ClankerCode?
 
-Dub Editor ClankerCode is a tool for creating/managing clips for What the Dub. It is a fork from Michael C. Main's (Dub Editor 2.4.3-beta)[https://github.com/deusprogrammer/dub-editor-electron].
+Dub Editor ClankerCode is a tool for creating/managing clips for What the Dub. It is a fork from Michael C. Main's [Dub Editor 2.4.3-beta](https://github.com/deusprogrammer/dub-editor-electron).
 
 Main additions/changes:
 - Automatic subtitle generation with whisper
