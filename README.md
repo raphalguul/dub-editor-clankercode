@@ -114,4 +114,4 @@ Dub Editor now comes with a little powershell script that allows you to batch re
 
 ## Bug Reports
 
-If you encounter any issues, flag them on this issues page here on GitHub. I might be able to look into it.
+If you encounter any issues, flag them on the issues page here on GitHub. I might be able to look into it.
