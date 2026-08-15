@@ -104,7 +104,7 @@ Install and run electron-packager on the root of the project.
 
 When you first launch the app, it will ask you to configure the game directories for Rifftrax and What the Dub. Use an empty folder. Dub Editor will build the required skeleton. This folder will hold all your clips and srt files plus a few more files that Dub Editor uses to keep track of normalization.
 
-You can copy other Videoclips and Subtitles folders into the whatthedub folder Dub Editor creates if you want to editor existing clips in Dub Editor.
+You can copy other Videoclips and Subtitles folders into the whatthedub folder Dub Editor creates if you want to edit existing clips in Dub Editor.
 
 ## Re-encode script
 
