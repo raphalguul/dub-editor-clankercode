@@ -1,3 +1,5 @@
+import { version as APP_VERSION } from '../../../release/app/package.json';
+
 export let convertTimestampToSeconds = (timestamp) => {
     let regex = /(\d\d):(\d\d):(\d\d),(\d\d\d)/;
     let match = regex.exec(timestamp);
@@ -34,7 +36,7 @@ export let convertSecondsToAltTimestamp = (seconds) => {
 };
 
 export let convertSubtitlesToSrt = (subtitles, game) => {
-    return subtitles
+    const body = subtitles
         .map((subtitle, index) => {
             let text;
             if (subtitle.type === 'dynamic' && game === 'rifftrax') {
@@ -55,6 +57,8 @@ export let convertSubtitlesToSrt = (subtitles, game) => {
             )}\n${text}`;
         })
         .join('\n\n');
+    const versionTag = APP_VERSION ? ` ${APP_VERSION}` : '';
+    return `${body}\n\n# METADATA: Dub Editor CC${versionTag}`;
 };
 
 export let convertSrtToSubtitles = (srtBase64) => {
