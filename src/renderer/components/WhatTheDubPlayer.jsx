@@ -47,6 +47,8 @@ export default (props) => {
     }, [props.videoPosition, props.seekKey]);
 
     useEffect(() => {
+        hasEnded = false;
+        isTalking = false;
         retryCountRef.current = 0;
         setVideoError(null);
     }, [props.videoSource]);
