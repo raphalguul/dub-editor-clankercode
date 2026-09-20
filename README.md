@@ -108,9 +108,11 @@ You can copy other Videoclips and Subtitles folders into the whatthedub folder D
 
 ## Re-encode script
 
-Dub Editor now comes with a little powershell script that allows you to batch re-encode all files within a folder. It currently points to the script root and drops the files in a new folder named _reencoded. You can change these settings by editing the script. Drop the videos in the script folder or edit the script to point to your video folder. Then open a powershell window in the folder that contains the script and run:
+Dub Editor now comes with a little powershell script that allows you to batch re-encode all files within a folder. It unifies auto-encoding and reduces resolution and bitrate if necessary. Open a powershell window in the folder that contains the script and run:
 
     .\reencode-clips.ps1
+
+Select your folder (subfolders will also be processed) and if files should be overwritten (if not, the script will create subfolders with the video files next to the originals).
 
 ## Bug Reports
 
