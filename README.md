@@ -63,6 +63,12 @@ From here it depends if you have already trimmed a video file to the exact lengt
 
 Once you select the export destination, Dub Editor will create a zip file with all the files required by the workshop. Export these files into an empty (!) folder, then start What the Dub and point the workshop uploader to this folder.
 
+## Censoring
+
+If your clip contains elements you don't want to be visible ingame you can create one or several censorship bars. Click on Censor Bars next to Subtitles. Placing these bars works the same as placing subtitles: Define in the timeline when the bar should appear and disappear. You can reposition and resize the censorship bar directly in the preview.
+
+Censor bars are currently static. There is no keyframe animation. If you want to move the bar you can create aditional bars and place them in the new positions, then time them such that one appears after the other.
+
 ## Keyboard Shortcuts
 
 | Key        | Function      |
