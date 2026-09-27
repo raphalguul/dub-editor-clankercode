@@ -129,6 +129,8 @@ button.selected {
 }
 
 .subtitle {
+    position: absolute;
+    top: 0;
     cursor: grab;
     height: 95%;
     z-index: 9999;
@@ -138,9 +140,89 @@ button.selected {
     color: white;
 }
 
+.censor-bar {
+    position: absolute;
+    top: 0;
+    cursor: grab;
+    height: 95%;
+    z-index: 9999;
+    border: 1px solid #3d1f00;
+    overflow: hidden;
+    background-color: #b3541e;
+    color: white;
+    font-size: 11px;
+}
+
+.censor-bar.selected {
+    background-color: #ff8c42 !important;
+}
+
 .subtitle:active {
     cursor: grabbing;
 }
+
+.censor-bar:active {
+    cursor: grabbing;
+}
+
+.list-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.list-tabs button {
+    flex: 1;
+    padding: 4px 8px;
+    background-color: #000000;
+    color: #a8a8a8;
+    border: 1px solid #8a8a8a;
+}
+
+.list-tabs button.selected {
+    background-color: #1c1c1c !important;
+    color: #ffffff !important;
+    border-color: #8a8a8a;
+}
+
+.censor-bar-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.censor-bar-shape {
+       position: absolute;
+       pointer-events: auto;
+   }
+   
+   .censor-bar-shape.interactive {
+       cursor: move;
+       border: 1px dashed rgba(255, 255, 255, 0.9);
+       box-sizing: border-box;
+   }
+
+.censor-bar-handle {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background-color: #ff8c42;
+    border: 1px solid black;
+    box-sizing: border-box;
+}
+
+.censor-bar-handle.nw { cursor: nwse-resize; }
+.censor-bar-handle.n { cursor: ns-resize; }
+.censor-bar-handle.ne { cursor: nesw-resize; }
+.censor-bar-handle.e { cursor: ew-resize; }
+.censor-bar-handle.se { cursor: nwse-resize; }
+.censor-bar-handle.s { cursor: ns-resize; }
+.censor-bar-handle.sw { cursor: nesw-resize; }
+.censor-bar-handle.w { cursor: ew-resize; }
 
 .resize-left,
 .resize-left:active {
@@ -403,4 +485,59 @@ input[type='range']:focus::-webkit-slider-runnable-track {
 .clip-lock-col {
     width: 24px;
     text-align: center;
+}
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+.modal {
+    background: #1e1e1e;
+    padding: 20px;
+    border-radius: 4px;
+    min-width: 300px;
+    color: white;
+}
+.modal h4 {
+    margin: 0 0 16px;
+}
+.modal input {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 16px;
+    background: #2d2d2d;
+    border: 1px solid #444;
+    color: white;
+    border-radius: 3px;
+}
+.modal input:focus {
+    outline: none;
+    border-color: #3071a9;
+}
+.modal-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.modal-buttons button {
+    padding: 6px 16px;
+    background: #3071a9;
+    border: none;
+    color: white;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.modal-buttons button:hover {
+    background: #367ebd;
+}
+.modal-buttons button:last-child {
+    background: #444;
+}
+.modal-buttons button:last-child:hover {
+    background: #555;
 }

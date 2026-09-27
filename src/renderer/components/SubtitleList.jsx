@@ -1,5 +1,6 @@
 import CollectionAPI from 'renderer/api/CollectionAPI';
 import ConfigAPI from 'renderer/api/ConfigAPI';
+import CensorBarList from './CensorBarList';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -23,16 +24,24 @@ let convertMillisecondsToTimestamp = (milliseconds) => {
 
 export default ({
     subs,
+    censorBars,
+    activeTab,
+    onTabChange,
+    onCensorBarsChange,
     videoId,
     clipNumberOverride,
     titleOverride,
     currentSub,
+    currentCensor,
     currentRow,
     currentSliderPosition,
     game,
     videoLength,
+    frameWidth,
+    frameHeight,
     onSubsChange,
     onSelectSub,
+    onSelectCensorBar,
     onSave,
     isEdit,
 }) => {
@@ -41,6 +50,9 @@ export default ({
     const [collections, setCollections] = useState([]);
     const [selectedCollection, setSelectedCollection] = useState('_none');
     const [rememberAddCollection, setRememberAddCollection] = useState(false);
+    const [showNewPackModal, setShowNewPackModal] = useState(false);
+    const [newPackName, setNewPackName] = useState('');
+    const [previousCollection, setPreviousCollection] = useState('_none');
 
     let videoLengthMs = videoLength * 1000;
     let defaultClipSize = videoLengthMs * 0.1;
@@ -86,6 +98,27 @@ export default ({
     const getCollections = async () => {
         let collections = await CollectionAPI.getCollections(game);
         setCollections(collections);
+    };
+
+    const handleCollectionChange = ({ target: { value } }) => {
+        if (value === '__new_pack__') {
+            setPreviousCollection(selectedCollection);
+            setNewPackName('');
+            setShowNewPackModal(true);
+            return;
+        }
+        setSelectedCollection(value);
+    };
+
+    const createNewPack = async () => {
+        const name = newPackName.trim();
+        if (!name) return;
+        if (collections[name]) return;
+        await CollectionAPI.createNewCollection(name, game);
+        const updated = await CollectionAPI.getCollections(game);
+        setCollections(updated);
+        setSelectedCollection(name);
+        setShowNewPackModal(false);
     };
 
     let currentSubObject = subs[currentSub];
@@ -138,15 +171,14 @@ export default ({
                         <td style={{ whiteSpace: 'nowrap' }}>
                             <select
                                 value={selectedCollection}
-                                onChange={({ target: { value } }) => {
-                                    setSelectedCollection(value);
-                                }}
+                                onChange={handleCollectionChange}
                                 disabled={isEdit}
                             >
-                                <option key="_none">None</option>
+                                <option value="_none">None</option>
+                                <option value="__new_pack__">New Pack…</option>
                                 {Object.keys(collections).sort().map(
                                     (collectionId) => (
-                                        <option key={collectionId}>{collectionId}</option>
+                                        <option key={collectionId} value={collectionId}>{collectionId}</option>
                                     )
                                 )}
                             </select>
@@ -187,6 +219,34 @@ export default ({
                     <button>Cancel</button>
                 </Link>
             </div>
+            <div className="list-tabs">
+                <button
+                    className={activeTab === 'subtitles' ? 'selected' : ''}
+                    onClick={() => onTabChange('subtitles')}
+                >
+                    Subtitles ({subs.length})
+                </button>
+                <button
+                    className={activeTab === 'censors' ? 'selected' : ''}
+                    onClick={() => onTabChange('censors')}
+                >
+                    Censor Bars ({censorBars.length})
+                </button>
+            </div>
+            {activeTab === 'censors' ? (
+                <CensorBarList
+                    censorBars={censorBars}
+                    currentBar={currentCensor}
+                    currentSliderPosition={currentSliderPosition}
+                    currentRow={currentRow}
+                    videoLength={videoLength}
+                    frameWidth={frameWidth}
+                    frameHeight={frameHeight}
+                    onCensorBarsChange={onCensorBarsChange}
+                    onSelectBar={onSelectCensorBar}
+                />
+            ) : (
+                <>
             <h3>Subtitles</h3>
             <div className="subtitle-list">
                 <table>
@@ -476,6 +536,38 @@ export default ({
                     </tbody>
                 </table>
             </div>
+                </>
+            )}
+        {showNewPackModal && (
+            <div
+                className="modal-overlay"
+                onClick={() => {
+                    setShowNewPackModal(false);
+                    setSelectedCollection(previousCollection);
+                }}
+            >
+                <div
+                    className="modal"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <h4>Create New Clip Pack</h4>
+                    <input
+                        value={newPackName}
+                        onChange={(e) => setNewPackName(e.target.value)}
+                        placeholder="Pack name"
+                        autoFocus
+                        onKeyDown={(e) => e.key === 'Enter' && createNewPack()}
+                    />
+                    <div className="modal-buttons">
+                        <button onClick={createNewPack}>Create</button>
+                        <button onClick={() => {
+                            setShowNewPackModal(false);
+                            setSelectedCollection(previousCollection);
+                        }}>Cancel</button>
+                    </div>
+                </div>
+            </div>
+        )}
         </div>
     );
 };

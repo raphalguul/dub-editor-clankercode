@@ -25,6 +25,8 @@ interface MediaInfo {
     tracks: AudioTrackInfo[];
     videoCodec: string | null;
     videoPixFmt: string | null;
+    videoWidth: number;
+    videoHeight: number;
     duration: number;
 }
 
@@ -77,7 +79,7 @@ function convertToCompatible(inputPath: string, outputPath: string): Promise<voi
             .audioCodec('aac')
             .audioBitrate('192k')
             .audioChannels(2)
-            .outputOptions(['-crf', '23', '-preset', 'medium'])
+            .outputOptions(['-crf', '27', '-preset', 'medium'])
             .output(outputPath)
             .on('end', () => {
                 log.info('Conversion complete: ' + outputPath);
@@ -115,6 +117,8 @@ function probeMediaInfo(filePath: string): Promise<MediaInfo> {
                 tracks,
                 videoCodec: videoStream?.codec_name || null,
                 videoPixFmt: videoStream?.pix_fmt || null,
+                videoWidth: videoStream?.width || 0,
+                videoHeight: videoStream?.height || 0,
                 duration: parseFloat(metadata.format?.duration || '0'),
             });
         });

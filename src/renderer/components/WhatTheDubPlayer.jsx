@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createWebVttDataUri } from '../util/VideoTools';
+import CensorBarOverlay from './CensorBarOverlay';
 
 let isTalking = false;
 let hasEnded = false;
@@ -16,7 +17,10 @@ export default (props) => {
     const subsRef = useRef(props.subs);
     subsRef.current = props.subs;
 
-    const videoElement = React.createRef();
+    // Must be a stable ref, not React.createRef(): createRef() returns a NEW object
+    // every render, which made the overlay's videoRef prop change identity and tore
+    // down and rebuilt its measurement effect on every render of this player.
+    const videoElement = useRef(null);
 
     const maleVoice = window.speechSynthesis.getVoices().find((element) => {
         return (
@@ -223,11 +227,12 @@ export default (props) => {
                     {videoError ? `Video Error: ${videoError}` : null}
                 </div>
                     {props.videoSource ? (
+                    <>
                     <video
                         id="videoElement"
                         ref={videoElement}
                         src={props.videoSource}
-                        style={{ width: props.width }}
+                        style={{ width: props.width, display: 'block' }}
                         muted={muted}
                         onEnded={() => {
                             if (!isTalking) {
@@ -256,6 +261,16 @@ export default (props) => {
                             default
                         ></track>
                     </video>
+                    <CensorBarOverlay
+                        bars={props.censorBars}
+                        currentPosition={props.censorBarPosition || 0}
+                        selectedIndex={props.currentBarIndex}
+                        interactive={!!props.isCensorTab}
+                        videoRef={videoElement}
+                        onChange={props.onCensorBarChange}
+                        onSelect={props.onSelectCensorBar}
+                    />
+                    </>
                 ) : null}
             </div>
         );
@@ -282,10 +297,12 @@ export default (props) => {
                 {videoError ? `Video Error: ${videoError}` : null}
             </div>
             {props.videoSource ? (
+                <>
                 <video
                     id="videoElement"
                     ref={videoElement}
                     src={props.videoSource}
+                    style={{ display: 'block' }}
                     muted={muted}
                     onEnded={() => {
                         if (!isTalking) {
@@ -314,6 +331,16 @@ export default (props) => {
                         default
                     ></track>
                 </video>
+                <CensorBarOverlay
+                    bars={props.censorBars}
+                    currentPosition={props.censorBarPosition || 0}
+                    selectedIndex={props.currentBarIndex}
+                    interactive={!!props.isCensorTab}
+                    videoRef={videoElement}
+                    onChange={props.onCensorBarChange}
+                    onSelect={props.onSelectCensorBar}
+                />
+                </>
             ) : null}
         </div>
     );

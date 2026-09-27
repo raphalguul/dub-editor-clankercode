@@ -12,5 +12,6 @@ export type DirectoryList = {
 export type ClipPaths = {
     clip: string,
     subtitle: string,
+    censorBars: string,
     thumbnail: string
 }

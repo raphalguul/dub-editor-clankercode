@@ -28,6 +28,7 @@ import JSZip from 'jszip';
 import { ClipPaths, DirectoryList } from './types';
 import * as whisper from './whisper';
 import { isCompatible, convertToCompatible, probeMediaInfo, AudioTrackInfo } from './videoFormat';
+import { buildCensorFilterGraph, buildCensorOutputMaps, CensorBar } from './censorFilter';
 
 const ffmpeg = require('fluent-ffmpeg');
 const StreamZip = require('node-stream-zip');
@@ -264,12 +265,99 @@ const createMediaFolders = (game: string) => {
     fs.mkdirSync(logFile, {recursive: true});
 }
 
-const processVideo = (inputFilePath: string, outputFilePath: string, startTime: number, duration: number, audioTrackIndex?: number) => {
+const CENSOR_SOURCE_SUFFIX = '.source.mp4';
+
+const getCensorSourcePath = (clipFilePath: string): string => {
+    return clipFilePath.replace(/\.mp4$/i, '') + CENSOR_SOURCE_SUFFIX;
+};
+
+// Baking is destructive, so every censored clip keeps an uncensored master.
+// Without it a second save would composite the new bars on top of the old
+// ones and removed bars would stay burned into the pixels forever.
+const resolveCensorEncodeSource = (clipFilePath: string, uncensoredPath: string): string => {
+    const masterPath = getCensorSourcePath(clipFilePath);
+    if (fs.existsSync(masterPath)) {
+        return masterPath;
+    }
+    fs.copyFileSync(uncensoredPath, masterPath);
+    return masterPath;
+};
+
+const restoreUncensoredClip = (clipFilePath: string): boolean => {
+    const masterPath = getCensorSourcePath(clipFilePath);
+    if (!fs.existsSync(masterPath)) {
+        return false;
+    }
+    fs.copyFileSync(masterPath, clipFilePath);
+    return true;
+};
+
+const writeCensorBars = (
+    censorFilePath: string,
+    clipFilePath: string,
+    json: string | undefined,
+    bars: CensorBar[]
+) => {
+    if (bars && bars.length > 0) {
+        fs.writeFileSync(censorFilePath, json || JSON.stringify({ censorBars: bars }, null, 5));
+        return;
+    }
+    try { fs.unlinkSync(censorFilePath); } catch {}
+    // Nothing is baked in any more, so the uncensored copy is redundant. It has to be
+    // resolved from the clip path: the sidecar lives in the subtitles directory, so
+    // deriving the master from it would point at a file that never exists.
+    try { fs.unlinkSync(getCensorSourcePath(clipFilePath)); } catch {}
+};
+
+const readCensorBars = (censorFilePath: string): CensorBar[] => {
+    try {
+        if (!fs.existsSync(censorFilePath)) {
+            return [];
+        }
+        const parsed = JSON.parse(fs.readFileSync(censorFilePath, { encoding: 'utf-8' }));
+        const list = Array.isArray(parsed) ? parsed : parsed?.censorBars;
+        return Array.isArray(list) ? list : [];
+    } catch (err) {
+        log.error('Unable to read censor bars: ' + err);
+        return [];
+    }
+};
+
+const processVideo = async (
+    inputFilePath: string,
+    outputFilePath: string,
+    startTime: number,
+    duration: number,
+    audioTrackIndex?: number,
+    censorBars?: CensorBar[]
+) => {
+    let filterGraph = '';
+
+    if (censorBars && censorBars.length > 0) {
+        try {
+            const info = await probeMediaInfo(inputFilePath);
+            // seekInput() below rebases the output timeline to 0, so `t` inside
+            // the graph is already clip relative. The renderer sends clip relative
+            // times too, which means the offset must stay 0 here.
+            filterGraph = buildCensorFilterGraph(censorBars, info.videoWidth, info.videoHeight, 0);
+            if (filterGraph) {
+                log.info('CENSOR FILTER GRAPH: ' + filterGraph);
+            } else {
+                log.info('Censor bars present but none were renderable');
+            }
+        } catch (err) {
+            log.error('Unable to build censor filter graph: ' + err);
+        }
+    }
+
+    // A real re-encode is happening anyway, so prefer the hardware encoder.
+    const videoCodec = filterGraph ? await getEncoder() : 'libx264';
+
     return new Promise((resolve, reject) => {
         log.info("PROCESSING " + inputFilePath);
         log.info("STORING TO " + outputFilePath);
         let cmd = ffmpeg(inputFilePath)
-            .videoCodec("libx264")
+            .videoCodec(videoCodec)
             .audioCodec("aac")
             .audioBitrate("192k")
             .audioChannels(2)
@@ -277,10 +365,20 @@ const processVideo = (inputFilePath: string, outputFilePath: string, startTime: 
             .seekInput(startTime / 1000)
             .outputOptions(['-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-t', String(duration / 1000)]);
 
-        const outputOpts: string[] = [];
-        if (audioTrackIndex !== undefined) {
-            outputOpts.push('-map', '0:v:0', '-map', `0:${audioTrackIndex}`);
+        if (!filterGraph && videoCodec === 'libx264') {
+            cmd = cmd.outputOptions(['-crf', '27', '-preset', 'medium']);
+        } else if (filterGraph && videoCodec === 'h264_nvenc') {
+            cmd = cmd.outputOptions(['-preset', 'p1', '-cq', '27']);
+        } else if (filterGraph && videoCodec === 'h264_amf') {
+            cmd = cmd.outputOptions(['-quality', 'speed', '-qp_i', '27', '-qp_p', '27']);
+        } else if (filterGraph && videoCodec === 'h264_qsv') {
+            cmd = cmd.outputOptions(['-preset', 'veryfast', '-global_quality', '27']);
         }
+
+        if (filterGraph) {
+            cmd = cmd.complexFilter([filterGraph]);
+        }
+        const outputOpts = buildCensorOutputMaps(filterGraph, audioTrackIndex);
         if (outputOpts.length > 0) { cmd = cmd.outputOptions(outputOpts); }
 
         cmd.output(outputFilePath)
@@ -291,7 +389,13 @@ const processVideo = (inputFilePath: string, outputFilePath: string, startTime: 
     });
 }
 
-const trimAndWriteVideo = async (inputFilePath: string, outputFilePath: string, startTime: number, endTime: number, audioTrackIndex?: number) => {
+const trimAndWriteVideo = async (
+    inputFilePath: string,
+    outputFilePath: string,
+    startTime: number,
+    endTime: number,
+    audioTrackIndex?: number
+) => {
     try {
         await processVideo(inputFilePath, outputFilePath, startTime, endTime - startTime, audioTrackIndex);
     } catch (err) {
@@ -482,6 +586,7 @@ const getClipPaths = (videoId: string, game: string): ClipPaths => {
     return {
         clip: path.join(clips, `${videoId}.mp4`),
         subtitle: path.join(subtitles, `${videoId}.srt`),
+        censorBars: path.join(subtitles, `${videoId}.censor.json`),
         thumbnail: path.join(thumbnails, `${videoId}.jpg`)
     }
 }
@@ -607,7 +712,8 @@ const importZip = async (filePath: string, game: string) => {
                 entry.name
                     .toLowerCase()
                     .startsWith(sourceVideoDirectory.toLowerCase()) &&
-                videoExtensions.some(ext => entry.name.toLowerCase().endsWith(ext))
+                videoExtensions.some(ext => entry.name.toLowerCase().endsWith(ext)) &&
+                !entry.name.toLowerCase().endsWith(CENSOR_SOURCE_SUFFIX)
         )
         .map((entry: any) => {
             const ext = videoExtensions.find(e => entry.name.toLowerCase().endsWith(e));
@@ -724,7 +830,7 @@ const exportToZip = async (
     });
 
     for (const videoId of collections[game][collectionId]) {
-        const {clip: videoFilePath, subtitle: subFilePath, thumbnail: thumbFilePath} = getClipPaths(videoId, game);
+        const {clip: videoFilePath, subtitle: subFilePath, censorBars: censorFilePath, thumbnail: thumbFilePath} = getClipPaths(videoId, game);
         
         if (!fs.existsSync(videoFilePath) || !fs.existsSync(subFilePath)) {
             log.info("SKIPPING " + videoId);
@@ -752,6 +858,17 @@ const exportToZip = async (
         root.folder('subtitles').file(`${videoId}.srt`, subtitlesBase64, {
             base64: true,
         });
+        if (fs.existsSync(censorFilePath)) {
+            const censorBarsBase64: string = fs.readFileSync(censorFilePath, {
+                encoding: 'base64',
+            });
+            // Ships alongside the .srt because that is where the sidecar lives on
+            // disk, which lets importZip pick it up with the subtitles folder.
+            // @ts-ignore
+            root.folder('subtitles').file(`${videoId}.censor.json`, censorBarsBase64, {
+                base64: true,
+            });
+        }
         // @ts-ignore
         root.folder('thumbnails').file(`${videoId}.jpg`, thumbNailBase64, {
             base64: true,
@@ -766,20 +883,38 @@ const exportToZip = async (
 const deleteClip = (id: string, game: string) => {
     log.info('DELETING ' + id + ' FOR GAME ' + game);
 
-    const {clip: videoFilePath, subtitle: subFilePath, thumbnail: thumbnailFilePath} = getClipPaths(id, game);
+    const {clip: videoFilePath, subtitle: subFilePath, censorBars: censorFilePath, thumbnail: thumbnailFilePath} = getClipPaths(id, game);
+
+    const normalizedMarkerPath = videoFilePath + NORMALIZED_MARKER_SUFFIX;
 
     log.info('DELETING ' + videoFilePath);
     log.info('DELETING ' + subFilePath);
+    log.info('DELETING ' + censorFilePath);
     log.info('DELETING ' + thumbnailFilePath);
+    log.info('DELETING ' + normalizedMarkerPath);
 
     // Delete video files
     if (fs.existsSync(videoFilePath)) {
         fs.unlinkSync(videoFilePath);
     }
 
+    // Delete normalized marker file
+    if (fs.existsSync(normalizedMarkerPath)) {
+        fs.unlinkSync(normalizedMarkerPath);
+    }
+
     // Delete subtitle files
     if (fs.existsSync(subFilePath)) {
         fs.unlinkSync(subFilePath);
+    }
+
+    if (fs.existsSync(censorFilePath)) {
+        fs.unlinkSync(censorFilePath);
+    }
+
+    const censorSourcePath = getCensorSourcePath(videoFilePath);
+    if (fs.existsSync(censorSourcePath)) {
+        fs.unlinkSync(censorSourcePath);
     }
 
     if (fs.existsSync(thumbnailFilePath)) {
@@ -1221,7 +1356,7 @@ ipcMain.handle('nextBatchClip', (_event) => {
     };
 });
 
-ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtitleObjects, title, clipNumber, game, audioTrackIndex}) => {
+ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtitleObjects, censorBars, censorBarsJson, title, clipNumber, game, audioTrackIndex}) => {
     log.info(`STORING ${title}-${clipNumber} for game ${game} with subtitles ${subtitles}`);
     log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
@@ -1233,13 +1368,26 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
 
     if (clip) {
         const id = createClipName(title, clipNumber);
-        const {clip: videoFilePath, subtitle: subFilePath} = getClipPaths(id, game);
+        const {clip: videoFilePath, subtitle: subFilePath, censorBars: censorFilePath} = getClipPaths(id, game);
 
-        await trimAndWriteVideo(fromLocalfileUrl(videoSource), videoFilePath, clip.startTime, clip.endTime, audioTrackIndex);
+        const bars: CensorBar[] = Array.isArray(censorBars) ? censorBars : [];
+        const sourceFile = fromLocalfileUrl(videoSource);
+
+        if (bars.length > 0) {
+            // Two passes: keep a trimmed, uncensored master so later geometry
+            // edits re-derive from clean pixels instead of stacking on the bake.
+            const masterPath = getCensorSourcePath(videoFilePath);
+            await trimAndWriteVideo(sourceFile, masterPath, clip.startTime, clip.endTime, audioTrackIndex);
+            const masterInfo = await probeMediaInfo(masterPath);
+            await processVideo(masterPath, videoFilePath, 0, masterInfo.duration * 1000, audioTrackIndex, bars);
+        } else {
+            await trimAndWriteVideo(sourceFile, videoFilePath, clip.startTime, clip.endTime, audioTrackIndex);
+        }
 
         try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
 
         fs.writeFileSync(subFilePath, subtitles);
+        writeCensorBars(censorFilePath, videoFilePath, censorBarsJson, bars);
 
         if (config.audioNormalizeOnFinalize) {
             normalizeVideo(videoFilePath, config, audioTrackIndex);
@@ -1276,7 +1424,7 @@ ipcMain.handle('getVideos', (event, game) => {
     const files = fs.readdirSync(clipsDirectory);
     const fileObjects: Array<any> = files
         .filter(
-            (file) => file.endsWith('.mp4')
+            (file) => file.endsWith('.mp4') && !file.endsWith(CENSOR_SOURCE_SUFFIX)
         )
         .map((file) => {
             return {
@@ -1294,20 +1442,32 @@ ipcMain.handle('getVideos', (event, game) => {
 ipcMain.handle('getVideo', (event, { id, game }) => {
     log.info('OPENING: ' + id + ' from game ' + game);
 
-    const {clip: videoFilePath, subtitle: subFilePath} = getClipPaths(id, game);
+    const {clip: videoFilePath, subtitle: subFilePath, censorBars: censorFilePath} = getClipPaths(id, game);
 
     const subtitles: string = fs.readFileSync(subFilePath, {
         encoding: 'base64',
     });
 
-    const videoUrl = `localfile:///${videoFilePath.replace(/\\/g, '/')}`;
-    log.info('GETVIDEO url=' + videoUrl + ' exists=' + fs.existsSync(videoFilePath));
+    // The editor draws its own overlay, so play the uncensored source when we
+    // have one, otherwise the baked bars would show up twice.
+    const censorSourcePath = getCensorSourcePath(videoFilePath);
+    const hasCensorSource = fs.existsSync(censorSourcePath);
+    const playbackPath = hasCensorSource ? censorSourcePath : videoFilePath;
+
+    const videoUrl = `localfile:///${playbackPath.replace(/\\/g, '/')}`;
+    log.info('GETVIDEO url=' + videoUrl + ' exists=' + fs.existsSync(playbackPath));
+
+    const censorBars = readCensorBars(censorFilePath);
 
     return {
         name: id.replace(/_/g, ' '),
         videoUrl,
         subtitles: [],
         srtBase64: subtitles,
+        censorBars,
+        // Without the master the burned in pixels are all that is left, so a
+        // re-bake would stack the new bars on top of the old ones for good.
+        censorSourceMissing: censorBars.length > 0 && !hasCensorSource,
     };
 });
 
@@ -1347,17 +1507,22 @@ ipcMain.handle(
 
         const newId = newTitle.replaceAll(' ', '_');
 
-        const {clip: videoFilePath, subtitle: subFilePath, thumbnail: thumbNailPath} = getClipPaths(id, game);
-        const {clip: newVideoFilePath, subtitle: newSubFilePath, thumbnail: newThumbNailPath} = getClipPaths(newId, game);
+        const {clip: videoFilePath, subtitle: subFilePath, censorBars: censorFilePath, thumbnail: thumbNailPath} = getClipPaths(id, game);
+        const {clip: newVideoFilePath, subtitle: newSubFilePath, censorBars: newCensorFilePath, thumbnail: newThumbNailPath} = getClipPaths(newId, game);
 
-        log.info(`RENAMING ${videoFilePath} to ${newVideoFilePath}`);
-        fs.renameSync(videoFilePath, newVideoFilePath);
+        const renameIfPresent = (from: string, to: string) => {
+            if (!fs.existsSync(from)) {
+                return;
+            }
+            log.info(`RENAMING ${from} to ${to}`);
+            fs.renameSync(from, to);
+        };
 
-        log.info(`RENAMING ${subFilePath} to ${newSubFilePath}`);
-        fs.renameSync(subFilePath, newSubFilePath);
-
-        log.info(`RENAMING ${thumbNailPath} to ${newThumbNailPath}`);
-        fs.renameSync(thumbNailPath, newThumbNailPath);
+        renameIfPresent(videoFilePath, newVideoFilePath);
+        renameIfPresent(subFilePath, newSubFilePath);
+        renameIfPresent(censorFilePath, newCensorFilePath);
+        renameIfPresent(getCensorSourcePath(videoFilePath), getCensorSourcePath(newVideoFilePath));
+        renameIfPresent(thumbNailPath, newThumbNailPath);
 
         removeFromCollection(game, collectionId, id);
         addToCollection(game, collectionId, [newId]);
@@ -1366,14 +1531,16 @@ ipcMain.handle(
 
 ipcMain.handle(
     'storeVideo',
-    async (event, { videoSource, subtitles, subtitleObjects, title, clipNumber, game, audioTrackIndex }) => {
+    async (event, { videoSource, subtitles, subtitleObjects, censorBars, censorBarsJson, title, clipNumber, game, audioTrackIndex }) => {
         log.info(`STORING ${title}-${clipNumber} for game ${game} with subtitles \n${subtitles}`);
         log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
         createMediaFolders(game);
 
         const id = createClipName(title, clipNumber);
-        const {clip: videoFilePath, subtitle: subFilePath, thumbnail: thumbNailPath} = getClipPaths(id, game);
+        const {clip: videoFilePath, subtitle: subFilePath, censorBars: censorFilePath, thumbnail: thumbNailPath} = getClipPaths(id, game);
+
+        const bars: CensorBar[] = Array.isArray(censorBars) ? censorBars : [];
 
         if (videoSource.startsWith("localfile://")) {
             log.info('SAVING VIDEO TO ' + videoFilePath + '\n' + subFilePath);
@@ -1382,39 +1549,51 @@ ipcMain.handle(
 
             const isSelfCopy = path.resolve(sourcePath) === path.resolve(videoFilePath);
 
-            if (!isSelfCopy) {
-                if (audioTrackIndex !== undefined) {
-                    log.info('Using audio track index: ' + audioTrackIndex + ' (stream copy)');
-                    await new Promise((resolve, reject) => {
-                        ffmpeg(sourcePath)
-                            .videoCodec('copy').audioCodec('copy')
-                            .outputOptions(['-map', '0:v:0', '-map', '0:' + audioTrackIndex])
-                            .output(videoFilePath)
-                            .on('end', resolve)
-                            .on('error', (err: Error) => { log.error('Stream copy failed: ' + err); reject(err); })
-                            .run();
-                    });
+            if (bars.length > 0) {
+                const encodeSource = resolveCensorEncodeSource(videoFilePath, isSelfCopy ? videoFilePath : sourcePath);
+                const tempPath = videoFilePath + '.censoring.mp4';
+
+                const info = await probeMediaInfo(encodeSource);
+                await processVideo(encodeSource, tempPath, 0, info.duration * 1000, audioTrackIndex, bars);
+                fs.renameSync(tempPath, videoFilePath);
+                try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
+            } else if (isSelfCopy) {
+                if (restoreUncensoredClip(videoFilePath)) {
+                    log.info('Censor bars removed, restored uncensored master');
                 } else {
-                    const compatible = await isCompatible(sourcePath);
-                    if (!compatible) {
-                        log.info('Source video is not compatible, converting...');
-                        const tmpPath = videoFilePath + '.converting.mp4';
-                        await convertToCompatible(sourcePath, tmpPath);
-                        fs.copyFileSync(tmpPath, videoFilePath);
-                        try { fs.unlinkSync(tmpPath); } catch {}
-                    } else {
-                        fs.copyFileSync(sourcePath, videoFilePath);
-                    }
+                    log.info('Source is same as destination, skipping video copy');
                 }
+            } else if (audioTrackIndex !== undefined) {
+                log.info('Using audio track index: ' + audioTrackIndex + ' (stream copy)');
+                await new Promise((resolve, reject) => {
+                    ffmpeg(sourcePath)
+                        .videoCodec('copy').audioCodec('copy')
+                        .outputOptions(['-map', '0:v:0', '-map', '0:' + audioTrackIndex])
+                        .output(videoFilePath)
+                        .on('end', resolve)
+                        .on('error', (err: Error) => { log.error('Stream copy failed: ' + err); reject(err); })
+                        .run();
+                });
                 try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
             } else {
-                log.info('Source is same as destination, skipping video copy');
+                const compatible = await isCompatible(sourcePath);
+                if (!compatible) {
+                    log.info('Source video is not compatible, converting...');
+                    const tmpPath = videoFilePath + '.converting.mp4';
+                    await convertToCompatible(sourcePath, tmpPath);
+                    fs.copyFileSync(tmpPath, videoFilePath);
+                    try { fs.unlinkSync(tmpPath); } catch {}
+                } else {
+                    fs.copyFileSync(sourcePath, videoFilePath);
+                }
+                try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
             }
 
             await createThumbnail(videoFilePath, '00:00:01', thumbNailPath);
         }
         log.info('SAVING SUBS TO ' + subFilePath);
         fs.writeFileSync(subFilePath, subtitles);
+        writeCensorBars(censorFilePath, videoFilePath, censorBarsJson, bars);
 
         if (config.audioNormalizeOnFinalize) {
             await normalizeVideo(videoFilePath, config, audioTrackIndex);

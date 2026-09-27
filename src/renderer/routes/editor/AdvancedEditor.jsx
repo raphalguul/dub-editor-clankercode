@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { addVideo, convertSrtToSubtitles } from '../../util/VideoTools';
+import { addVideo, convertSrtToSubtitles, convertJsonToCensorBars, createCensorBar, clampCensorBar, distributeCensorBars } from '../../util/VideoTools';
 
 import { api } from '../../util/Api';
 
@@ -43,7 +43,31 @@ let AdvancedEditor = () => {
     const [error, setError] = useState(null);
     const [videoSource, setVideoSource] = useState('');
     const [subs, setSubs] = useState([]);
+    const [censorBars, setCensorBars] = useState([]);
+    const [censorSourceMissing, setCensorSourceMissing] = useState(false);
+    const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
+    const [activeTab, setActiveTab] = useState('subtitles');
+
+// When switching to subtitles tab, deselect any censor bar
+    const handleTabChange = (tab) => {
+        setActiveTab(tab);
+        if (tab === 'subtitles') {
+            setCurrentSub(null);
+            setCurrentCensor(null);
+        }
+    };
+
+    // In subtitle mode, clicking a censor bar should select it AND switch to censor tab
+    const handleCensorSelect = (index) => {
+        if (isCensorTab) {
+            setCurrentCensor(index);
+        } else {
+            setCurrentCensor(index);
+            setActiveTab('censors');
+        }
+    };
     const [currentSub, setCurrentSub] = useState(null);
+    const [currentCensor, setCurrentCensor] = useState(null);
     const [selectedAudioTrack, setSelectedAudioTrack] = useState(0);
     const [playbackSource, setPlaybackSource] = useState('');
     const playbackSourceRef = useRef('');
@@ -83,12 +107,19 @@ let AdvancedEditor = () => {
         return false;
     };
 
+    const isCensorTab = activeTab === 'censors';
+    const activeItems = isCensorTab ? censorBars : subs;
+
     const stateRef = useRef();
     stateRef.current = {
         currentSub,
+        currentCensor,
         currentRow,
         currentSliderPosition,
         subs,
+        censorBars,
+        activeTab,
+        activeItems,
         isPlaying,
         defaultClipSize,
         videoLength,
@@ -106,19 +137,35 @@ let AdvancedEditor = () => {
 
         switch (event.key) {
             case 'ArrowUp': {
-                if (!stateRef.current.currentSub === null) {
+                const currentIndex = isCensorTab
+                    ? stateRef.current.currentCensor
+                    : stateRef.current.currentSub;
+                if (currentIndex === null) {
                     return;
                 }
-                setCurrentSub((currentSub) =>
-                    Math.min(stateRef.current.subs.length - 1, currentSub + 1)
-                );
+                if (isCensorTab) {
+                    setCurrentCensor((idx) =>
+                        Math.min(stateRef.current.activeItems.length - 1, idx + 1)
+                    );
+                } else {
+                    setCurrentSub((idx) =>
+                        Math.min(stateRef.current.activeItems.length - 1, idx + 1)
+                    );
+                }
                 break;
             }
             case 'ArrowDown': {
-                if (stateRef.current.currentSub === null) {
+                const currentIndex = isCensorTab
+                    ? stateRef.current.currentCensor
+                    : stateRef.current.currentSub;
+                if (currentIndex === null) {
                     return;
                 }
-                setCurrentSub((currentSub) => Math.max(0, currentSub - 1));
+                if (isCensorTab) {
+                    setCurrentCensor((idx) => Math.max(0, idx - 1));
+                } else {
+                    setCurrentSub((idx) => Math.max(0, idx - 1));
+                }
                 break;
             }
             case 'ArrowLeft': {
@@ -164,9 +211,11 @@ let AdvancedEditor = () => {
                 break;
             }
             case 'i': {
-                let currentSubObject =
-                    stateRef.current.subs[stateRef.current.currentSub];
-                subChangeHandler(
+                const currentIndex = isCensorTab
+                    ? stateRef.current.currentCensor
+                    : stateRef.current.currentSub;
+                let currentSubObject = stateRef.current.activeItems[currentIndex];
+                activeChangeHandler(
                     'edit',
                     {
                         ...currentSubObject,
@@ -174,14 +223,16 @@ let AdvancedEditor = () => {
                             stateRef.current.currentSliderPosition -
                             stateRef.current.offset,
                     },
-                    stateRef.current.currentSub
+                    currentIndex
                 );
                 break;
             }
             case 'o': {
-                let currentSubObject =
-                    stateRef.current.subs[stateRef.current.currentSub];
-                subChangeHandler(
+                const currentIndex = isCensorTab
+                    ? stateRef.current.currentCensor
+                    : stateRef.current.currentSub;
+                let currentSubObject = stateRef.current.activeItems[currentIndex];
+                activeChangeHandler(
                     'edit',
                     {
                         ...currentSubObject,
@@ -189,19 +240,23 @@ let AdvancedEditor = () => {
                             stateRef.current.currentSliderPosition -
                             stateRef.current.offset,
                     },
-                    stateRef.current.currentSub
+                    currentIndex
                 );
                 break;
             }
             case '[': {
-                let currentSubObject =
-                    stateRef.current.subs[stateRef.current.currentSub];
+                const currentIndex = isCensorTab
+                    ? stateRef.current.currentCensor
+                    : stateRef.current.currentSub;
+                let currentSubObject = stateRef.current.activeItems[currentIndex];
                 scrub(currentSubObject.startTime + stateRef.current.offset);
                 break;
             }
             case ']': {
-                let currentSubObject =
-                    stateRef.current.subs[stateRef.current.currentSub];
+                const currentIndex = isCensorTab
+                    ? stateRef.current.currentCensor
+                    : stateRef.current.currentSub;
+                let currentSubObject = stateRef.current.activeItems[currentIndex];
                 scrub(currentSubObject.endTime + stateRef.current.offset);
                 break;
             }
@@ -213,31 +268,62 @@ let AdvancedEditor = () => {
                 setCurrentRow((currentRow) => Math.min(4, currentRow + 1));
                 break;
             }
-            case 'n':
-                subChangeHandler('add', {
-                    rowIndex: stateRef.current.currentRow,
-                    startTime:
-                        parseInt(stateRef.current.currentSliderPosition) -
-                        stateRef.current.offset,
-                    endTime:
-                        Math.min(parseInt(stateRef.current.currentSliderPosition) -
-                        stateRef.current.offset +
-                        stateRef.current.defaultClipSize, stateRef.current.videoLength * 1000),
-                    text: '',
-                    type: 'subtitle',
-                    voice: 'male',
-                    speaker: '',
-                });
+            case 'n': {
+                let startTime =
+                    parseInt(stateRef.current.currentSliderPosition) -
+                    stateRef.current.offset;
+                if (stateRef.current.activeTab === 'censors') {
+                    activeChangeHandler('add', {
+                        ...createCensorBar({
+                            startTime,
+                            endTime: Math.min(
+                                startTime + stateRef.current.defaultClipSize,
+                                stateRef.current.videoLength * 1000
+                            ),
+                            rowIndex: stateRef.current.currentRow,
+                        }),
+                        rowIndex: stateRef.current.currentRow,
+                    });
+                } else {
+                    activeChangeHandler('add', {
+                        rowIndex: stateRef.current.currentRow,
+                        startTime: startTime,
+                        endTime:
+                            Math.min(startTime + stateRef.current.defaultClipSize, stateRef.current.videoLength * 1000),
+                        text: '',
+                        type: 'subtitle',
+                        voice: 'male',
+                        speaker: '',
+                    });
+                }
                 break;
-            case 't':
-                document.getElementById('subtitle-type').focus();
+            }
+            case 't': {
+                let typeSelect = document.getElementById(
+                    stateRef.current.activeTab === 'censors'
+                        ? 'censor-bar-type'
+                        : 'subtitle-type'
+                );
+                if (typeSelect) {
+                    typeSelect.focus();
+                }
                 break;
-            case 'g':
-                document.getElementById('subtitle-voice').focus();
+            }
+            case 'g': {
+                let voiceSelect =
+                    document.getElementById('subtitle-voice');
+                if (voiceSelect) {
+                    voiceSelect.focus();
+                }
                 break;
-            case 'e':
-                document.getElementById('subtitle-text').focus();
+            }
+            case 'e': {
+                let textArea = document.getElementById('subtitle-text');
+                if (textArea) {
+                    textArea.focus();
+                }
                 break;
+            }
             case ' ':
                 setIsPlaying((isPlaying) => !isPlaying);
                 break;
@@ -272,11 +358,14 @@ let AdvancedEditor = () => {
     }, []);
 
     useEffect(() => {
+        if (activeTab !== 'subtitles') {
+            return;
+        }
         let index = getCurrentIndex();
         if (index >= 0) {
             setCurrentSub(index);
         }
-    }, [currentSliderPosition]);
+    }, [currentSliderPosition, activeTab]);
 
     useEffect(() => {
         return () => {
@@ -323,10 +412,22 @@ let AdvancedEditor = () => {
 
         let mediaInfo = await VideoAPI.getAudioTracks(videoDetails.videoUrl);
         let firstAudioIndex = mediaInfo.tracks[0]?.index ?? 0;
+        setFrameSize({
+            width: mediaInfo.videoWidth || 0,
+            height: mediaInfo.videoHeight || 0,
+        });
         setSelectedAudioTrack(firstAudioIndex);
 
         subtitles = distributeSubs(subtitles);
         setSubs(subtitles);
+
+        setCensorBars(
+            distributeCensorBars(
+                convertJsonToCensorBars(videoDetails.censorBars)
+            )
+        );
+
+        setCensorSourceMissing(!!videoDetails.censorSourceMissing);
 
         if (subtitles.length > 0) {
             setCurrentSub(0);
@@ -409,6 +510,10 @@ let AdvancedEditor = () => {
 
         let mediaInfo = await VideoAPI.getAudioTracks(video);
         let firstAudioIndex = mediaInfo.tracks[0]?.index ?? 0;
+        setFrameSize({
+            width: mediaInfo.videoWidth || 0,
+            height: mediaInfo.videoHeight || 0,
+        });
         let track = audioTrackIndex !== undefined ? audioTrackIndex : firstAudioIndex;
 
         let playSource;
@@ -467,6 +572,10 @@ let AdvancedEditor = () => {
 
         let mediaInfo = await VideoAPI.getAudioTracks(source);
         let firstAudioIndex = mediaInfo.tracks[0]?.index ?? 0;
+        setFrameSize({
+            width: mediaInfo.videoWidth || 0,
+            height: mediaInfo.videoHeight || 0,
+        });
         let selectedTrack = firstAudioIndex;
 
         if (mediaInfo.tracks.length > 1) {
@@ -530,6 +639,18 @@ let AdvancedEditor = () => {
             }
         }
 
+        if (censorSourceMissing && censorBars.length > 0) {
+            const confirmed = await window.api.send('showConfirmDialog', {
+                message:
+                    'The uncensored master for this clip is missing, so the existing censor bars are already burned into the video.\n\n' +
+                    'Finalizing now will bake the new bars on top of the burned-in ones, permanently stacking the blur and box edges. ' +
+                    'This cannot be undone.',
+            });
+            if (!confirmed) {
+                return;
+            }
+        }
+
         if (!isEdit && (await checkClipExists(videoName, clipNumber))) {
             const config = await ConfigAPI.getConfig();
             if (config.autoIncrementClipNumber !== false) {
@@ -574,7 +695,8 @@ let AdvancedEditor = () => {
                 clipNumber,
                 params.type,
                 isBatch,
-                selectedAudioTrack
+                selectedAudioTrack,
+                censorBars
             );
             if (!collectionId.startsWith('_')) {
                 await CollectionAPI.addToCollection(
@@ -734,6 +856,82 @@ let AdvancedEditor = () => {
         }
     };
 
+    const censorBarChangeHandler = (mode, bar) => {
+        if (mode === 'add') {
+            let newIndex = 0;
+            let barList = [...stateRef.current.censorBars, bar]
+                .sort((a, b) => a.startTime - b.startTime)
+                .map((modifiedBar, index) => {
+                    if (modifiedBar.index === undefined || modifiedBar.index === null) {
+                        newIndex = index;
+                    }
+                    return { ...modifiedBar, index };
+                });
+            barList = distributeCensorBars(barList);
+            setCurrentSub(newIndex);
+            setCensorBars(barList);
+        } else if (mode === 'edit') {
+            let length = bar.endTime - bar.startTime;
+            if (bar.startTime < 0) {
+                bar.startTime = 0;
+                bar.endTime = bar.startTime + length;
+            }
+            let videoEndMs = stateRef.current.videoLength * 1000;
+            if (bar.endTime > videoEndMs) {
+                bar.endTime = videoEndMs;
+            } else if (videoEndMs - bar.endTime < 100) {
+                bar.endTime = videoEndMs;
+            }
+
+            const edited = clampCensorBar(bar);
+            // Applied through the updater so the edit always lands on the live list
+            // rather than a snapshot that may predate it -- a drag fires one of these
+            // per mousemove, which is far faster than the list re-renders.
+            setCensorBars((prev) => {
+                // `bar.index` was captured when the interaction started, so a re-sort
+                // in the meantime can leave it pointing at a different bar. Geometry
+                // edits never touch startTime, so use it to confirm the slot before
+                // overwriting, and re-derive the real position if it has moved.
+                let target = edited.index;
+                const atIndex = Number.isInteger(target) ? prev[target] : undefined;
+                if (!atIndex || atIndex.startTime !== edited.startTime) {
+                    const match = prev.findIndex(
+                        (existing) => existing.startTime === edited.startTime
+                    );
+                    if (match >= 0) {
+                        target = match;
+                    }
+                }
+                if (!Number.isInteger(target) || target < 0 || target >= prev.length) {
+                    return prev;
+                }
+
+                let barList = [...prev];
+                barList[target] = { ...edited, index: target };
+                barList = barList.map((modifiedBar, index) => ({ ...modifiedBar, index }));
+                return distributeCensorBars(barList);
+            });
+        } else if (mode === 'remove') {
+            let barList = [...stateRef.current.censorBars];
+            barList.splice(bar.index, 1);
+            barList = barList.map((modifiedBar, index) => ({ ...modifiedBar, index }));
+            setCensorBars(barList);
+        } else if (mode === 'sort') {
+            let barList = [...stateRef.current.censorBars]
+                .sort((a, b) => a.startTime - b.startTime)
+                .map((modifiedBar, index) => ({ ...modifiedBar, index }));
+            setCensorBars(distributeCensorBars(barList));
+        }
+    };
+
+    const activeChangeHandler = (mode, item) => {
+        if (stateRef.current.activeTab === 'censors') {
+            censorBarChangeHandler(mode, item);
+        } else {
+            subChangeHandler(mode, item);
+        }
+    };
+
     if (isBatch && !videoSource) {
         return <div>Loading Video...</div>;
     }
@@ -759,6 +957,12 @@ let AdvancedEditor = () => {
                             }
                             videoPosition={currentPosition}
                             subs={subs}
+                            censorBars={censorBars}
+                            censorBarPosition={currentSliderPosition - offset}
+currentBarIndex={currentCensor}
+                            isCensorTab={isCensorTab}
+                            onCensorBarChange={censorBarChangeHandler}
+                            onSelectCensorBar={handleCensorSelect}
                             offset={offset}
                             substitution={substitution}
                             onEnd={() => {
@@ -766,8 +970,8 @@ let AdvancedEditor = () => {
                                 setCurrentSliderPosition(stateRef.current.offset + stateRef.current.videoLength * 1000 + 15);
                             }}
                             onIndexChange={(index) => {
-                                setCurrentSub(index);
-                            }}
+                                   setCurrentSub(index);
+                               }}
                             onVideoPositionChange={(position) => {
                                 setCurrentSliderPosition(Math.max(offset, position * 1000));
                             }}
@@ -811,12 +1015,20 @@ let AdvancedEditor = () => {
                             isEdit={isEdit}
                             titleOverride={batchClip?.title || titleOverride}
                             currentSub={currentSub}
+                            currentCensor={currentCensor}
                             currentRow={currentRow}
                             offset={offset}
                             subs={subs}
+                            censorBars={censorBars}
+                            activeTab={activeTab}
+                            onTabChange={handleTabChange}
                             videoLength={videoLength}
+                            frameWidth={frameSize.width}
+                            frameHeight={frameSize.height}
+                            onCensorBarsChange={censorBarChangeHandler}
                             onSubsChange={subChangeHandler}
                             onSelectSub={setCurrentSub}
+                            onSelectCensorBar={handleCensorSelect}
                             onSave={(title, number, collectionId) => {
                                 handleInterstitial(
                                     addVideoToGame(title, number, collectionId),
@@ -834,17 +1046,20 @@ let AdvancedEditor = () => {
                     <TimeLine
                         timelineWidth={windowSize.width * 0.9}
                         rowCount={5}
+                        kind={isCensorTab ? 'censor' : 'subtitle'}
                         isPlaying={isPlaying}
                         currentSub={currentSub}
+                        currentCensor={currentCensor}
                         currentRow={currentRow}
                         offset={offset}
                         currentPosition={currentPosition * 1000}
                         currentSliderPosition={currentSliderPosition}
                         videoLength={videoLength}
-                        subs={subs}
+                        subs={activeItems}
                         onStateChange={setIsPlaying}
                         onSubSelect={setCurrentSub}
-                        onSubsChange={subChangeHandler}
+                        onCensorSelect={handleCensorSelect}
+                        onSubsChange={activeChangeHandler}
                         onSliderPositionChange={scrub}
                         onRowChange={setCurrentRow}
                     />

@@ -28,6 +28,7 @@ export default ({
     timelineWidth,
     isPlaying,
     currentSub,
+    currentCensor,
     currentSliderPosition: actualSliderPosition,
     videoLength,
     offset,
@@ -36,13 +37,18 @@ export default ({
     onSubsChange,
     onStateChange,
     onSubSelect,
+    onCensorSelect,
     onRowChange,
     rowCount,
     currentRow,
+    kind = 'subtitle',
 }) => {
     if (!offset) {
         offset = 0;
     }
+
+    const selectedIndex = kind === 'censor' ? currentCensor : currentSub;
+    const blockClass = kind === 'censor' ? 'censor-bar' : 'subtitle';
 
     let videoLengthMs = videoLength * 1000;
 
@@ -443,9 +449,13 @@ export default ({
                                             }}
                                         ></div>
                                         <div
-                                            className={`${sub.index === currentSub ? 'subtitle selected' : 'subtitle'} ${sub.locked ? 'locked-clip' : ''} ${blinkingSubIndex === sub.index ? 'blink-red' : ''}`}
+                                            className={`${sub.index === selectedIndex ? `${blockClass} selected` : blockClass} ${sub.locked ? 'locked-clip' : ''} ${blinkingSubIndex === sub.index ? 'blink-red' : ''}`}
                                             onClick={() => {
-                                                onSubSelect(sub.index);
+                                                if (kind === 'censor' && onCensorSelect) {
+                                                    onCensorSelect(sub.index);
+                                                } else {
+                                                    onSubSelect(sub.index);
+                                                }
                                             }}
                                             onDragStart={(event) => {
                                                 if (sub.locked) {
@@ -505,7 +515,6 @@ export default ({
                                                 onSubSelect(sub.index);
                                             }}
                                             onDragEnd={(_event) => {
-                                                dragResizeRight = null;
                                                 onSubsChange('sort');
                                             }}
                                             draggable
@@ -522,6 +531,9 @@ export default ({
                                             }}
                                         >
                                             {sub.locked ? '\uD83D\uDD12 ' : ''}{sub.index}
+                                            {kind === 'censor' && sub.type
+                                                ? ` ${sub.type}`
+                                                : ''}
                                         </div>
                                         <div
                                             className={`resize-right ${sub.locked ? 'locked-resize-right' : ''} ${blinkingSubIndex === sub.index ? 'blink-red' : ''}`}
