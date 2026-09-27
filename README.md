@@ -67,7 +67,7 @@ Once you select the export destination, Dub Editor will create a zip file with a
 
 If your clip contains elements you don't want to be visible ingame (e.g. hard-coded subtitles) you can create one or several censorship bars. Click on Censor Bars next to Subtitles. Placing these bars works the same as placing subtitles: Define in the timeline when the bar should appear and disappear. You can reposition and resize the censorship bar directly in the preview.
 
-You can also select between different types of censoring. Note that gaussian blur takes the longest to process.
+You can also choose between different types of censoring. Note that gaussian blur takes the longest to process.
 
 Censor bars are currently static. There is no keyframe animation. If you want to move the bar you can create aditional bars and place them in the new positions, then time them such that one appears after the other.
 
