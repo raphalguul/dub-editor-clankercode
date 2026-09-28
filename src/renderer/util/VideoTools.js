@@ -338,7 +338,8 @@ export let addVideo = async (
     type,
     isBatch,
     audioTrackIndex,
-    censorBars = []
+    censorBars = [],
+    keepCensorSource = false
 ) => {
     let censorBarsJson = convertCensorBarsToJson(censorBars);
     if (isBatch) {
@@ -364,5 +365,6 @@ export let addVideo = async (
         clipNumber,
         game: type,
         audioTrackIndex,
+        keepCensorSource,
     });
 };

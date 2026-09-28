@@ -44,6 +44,7 @@ export default ({
     onSelectCensorBar,
     onSave,
     isEdit,
+    buttonsDisabled = false,
 }) => {
     const [clipTitle, setClipTitle] = useState(titleOverride || '');
     const [clipNumber, setClipNumber] = useState(clipNumberOverride || 1);
@@ -210,7 +211,10 @@ export default ({
                     onClick={() => {
                         onSave(clipTitle, clipNumber, selectedCollection);
                     }}
-                    disabled={!subs.find(({ type }) => type === 'dynamic')}
+                    disabled={
+                        buttonsDisabled ||
+                        !subs.find(({ type }) => type === 'dynamic')
+                    }
                 >
                     Finalize Clip
                 </button>

@@ -30,6 +30,10 @@ type Config = {
     whisperSuppressSilence: boolean;
     autoIncrementClipNumber: boolean;
     hardwareVideoDecode: boolean;
+    // 'saveSource' keeps an uncensored copy plus the bar data so censoring stays
+    // reversible, 'bakeOnly' keeps neither, and null means the user has not
+    // picked yet so the editor asks on the first censored finalize.
+    censorMode: 'saveSource' | 'bakeOnly' | null;
 };
 
 const defaultConfig: Config = {
@@ -64,6 +68,7 @@ const defaultConfig: Config = {
     whisperSuppressSilence: true,
     autoIncrementClipNumber: true,
     hardwareVideoDecode: true,
+    censorMode: null,
 };
 
 export default defaultConfig;

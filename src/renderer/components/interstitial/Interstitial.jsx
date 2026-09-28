@@ -2,10 +2,9 @@ import React from 'react';
 
 export const handleInterstitial = (promise, openInterstitial) => {
     openInterstitial(true);
-    return promise.then((result) => {
-        openInterstitial(false);
-        return result;
-    });
+    // finally, not then, so a rejected task can never orphan the full screen
+    // overlay. Rejections still propagate to the caller as before.
+    return Promise.resolve(promise).finally(() => openInterstitial(false));
 };
 
 export default ({ isOpen, children }) => {

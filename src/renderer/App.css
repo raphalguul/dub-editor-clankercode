@@ -503,8 +503,41 @@ input[type='range']:focus::-webkit-slider-runnable-track {
     min-width: 300px;
     color: white;
 }
+.modal-wide {
+    min-width: 520px;
+    max-width: 620px;
+}
 .modal h4 {
     margin: 0 0 16px;
+}
+.modal p {
+    margin: 0 0 16px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: #ccc;
+}
+.censor-mode-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: #2d2d2d;
+    border: 1px solid #444;
+    color: white;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.censor-mode-option:hover {
+    border-color: #3071a9;
+    background: #333;
+}
+.censor-mode-option span {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: #ccc;
 }
 .modal input {
     width: 100%;

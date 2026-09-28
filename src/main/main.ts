@@ -292,6 +292,14 @@ const restoreUncensoredClip = (clipFilePath: string): boolean => {
     return true;
 };
 
+const discardCensorSources = (censorFilePath: string, clipFilePath: string) => {
+    // The sidecar lives in the subtitles directory, so the master has to be
+    // resolved from the clip path: deriving it from the sidecar would point at a
+    // file that never exists.
+    try { fs.unlinkSync(censorFilePath); } catch {}
+    try { fs.unlinkSync(getCensorSourcePath(clipFilePath)); } catch {}
+};
+
 const writeCensorBars = (
     censorFilePath: string,
     clipFilePath: string,
@@ -302,11 +310,8 @@ const writeCensorBars = (
         fs.writeFileSync(censorFilePath, json || JSON.stringify({ censorBars: bars }, null, 5));
         return;
     }
-    try { fs.unlinkSync(censorFilePath); } catch {}
-    // Nothing is baked in any more, so the uncensored copy is redundant. It has to be
-    // resolved from the clip path: the sidecar lives in the subtitles directory, so
-    // deriving the master from it would point at a file that never exists.
-    try { fs.unlinkSync(getCensorSourcePath(clipFilePath)); } catch {}
+    // Nothing is baked in any more, so the uncensored copy is redundant.
+    discardCensorSources(censorFilePath, clipFilePath);
 };
 
 const readCensorBars = (censorFilePath: string): CensorBar[] => {
@@ -1372,14 +1377,21 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
 
         const bars: CensorBar[] = Array.isArray(censorBars) ? censorBars : [];
         const sourceFile = fromLocalfileUrl(videoSource);
+        const saveCensorSource = config.censorMode !== 'bakeOnly';
 
         if (bars.length > 0) {
-            // Two passes: keep a trimmed, uncensored master so later geometry
-            // edits re-derive from clean pixels instead of stacking on the bake.
-            const masterPath = getCensorSourcePath(videoFilePath);
-            await trimAndWriteVideo(sourceFile, masterPath, clip.startTime, clip.endTime, audioTrackIndex);
-            const masterInfo = await probeMediaInfo(masterPath);
-            await processVideo(masterPath, videoFilePath, 0, masterInfo.duration * 1000, audioTrackIndex, bars);
+            if (saveCensorSource) {
+                // Two passes: keep a trimmed, uncensored master so later geometry
+                // edits re-derive from clean pixels instead of stacking on the bake.
+                const masterPath = getCensorSourcePath(videoFilePath);
+                await trimAndWriteVideo(sourceFile, masterPath, clip.startTime, clip.endTime, audioTrackIndex);
+                const masterInfo = await probeMediaInfo(masterPath);
+                await processVideo(masterPath, videoFilePath, 0, masterInfo.duration * 1000, audioTrackIndex, bars);
+            } else {
+                // Nothing to keep, so trim and bake in a single pass straight off
+                // the source.
+                await processVideo(sourceFile, videoFilePath, clip.startTime, clip.endTime - clip.startTime, audioTrackIndex, bars);
+            }
         } else {
             await trimAndWriteVideo(sourceFile, videoFilePath, clip.startTime, clip.endTime, audioTrackIndex);
         }
@@ -1387,7 +1399,11 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
         try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
 
         fs.writeFileSync(subFilePath, subtitles);
-        writeCensorBars(censorFilePath, videoFilePath, censorBarsJson, bars);
+        if (saveCensorSource) {
+            writeCensorBars(censorFilePath, videoFilePath, censorBarsJson, bars);
+        } else {
+            discardCensorSources(censorFilePath, videoFilePath);
+        }
 
         if (config.audioNormalizeOnFinalize) {
             normalizeVideo(videoFilePath, config, audioTrackIndex);
@@ -1465,9 +1481,10 @@ ipcMain.handle('getVideo', (event, { id, game }) => {
         subtitles: [],
         srtBase64: subtitles,
         censorBars,
-        // Without the master the burned in pixels are all that is left, so a
-        // re-bake would stack the new bars on top of the old ones for good.
-        censorSourceMissing: censorBars.length > 0 && !hasCensorSource,
+        // The master is what makes the clip reversible, the sidecar is the proof
+        // that censor bars were ever applied to it.
+        hasCensorSource,
+        hasCensorData: fs.existsSync(censorFilePath),
     };
 });
 
@@ -1531,7 +1548,7 @@ ipcMain.handle(
 
 ipcMain.handle(
     'storeVideo',
-    async (event, { videoSource, subtitles, subtitleObjects, censorBars, censorBarsJson, title, clipNumber, game, audioTrackIndex }) => {
+    async (event, { videoSource, subtitles, subtitleObjects, censorBars, censorBarsJson, title, clipNumber, game, audioTrackIndex, keepCensorSource }) => {
         log.info(`STORING ${title}-${clipNumber} for game ${game} with subtitles \n${subtitles}`);
         log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
@@ -1542,6 +1559,12 @@ ipcMain.handle(
 
         const bars: CensorBar[] = Array.isArray(censorBars) ? censorBars : [];
 
+        // An unset censorMode is treated as the reversible mode so anything that
+        // reaches main without going through the editor keeps the old behaviour.
+        // The renderer overrides it for a single clip when the user chooses to
+        // keep a master that is already on disk.
+        const saveCensorSource = config.censorMode !== 'bakeOnly' || keepCensorSource === true;
+
         if (videoSource.startsWith("localfile://")) {
             log.info('SAVING VIDEO TO ' + videoFilePath + '\n' + subFilePath);
 
@@ -1550,7 +1573,17 @@ ipcMain.handle(
             const isSelfCopy = path.resolve(sourcePath) === path.resolve(videoFilePath);
 
             if (bars.length > 0) {
-                const encodeSource = resolveCensorEncodeSource(videoFilePath, isSelfCopy ? videoFilePath : sourcePath);
+                const masterPath = getCensorSourcePath(videoFilePath);
+                let encodeSource: string;
+                if (fs.existsSync(masterPath)) {
+                    // Always prefer the master when there is one, otherwise the new
+                    // bars would be composited on top of the old ones.
+                    encodeSource = masterPath;
+                } else if (saveCensorSource) {
+                    encodeSource = resolveCensorEncodeSource(videoFilePath, isSelfCopy ? videoFilePath : sourcePath);
+                } else {
+                    encodeSource = sourcePath;
+                }
                 const tempPath = videoFilePath + '.censoring.mp4';
 
                 const info = await probeMediaInfo(encodeSource);
@@ -1593,7 +1626,13 @@ ipcMain.handle(
         }
         log.info('SAVING SUBS TO ' + subFilePath);
         fs.writeFileSync(subFilePath, subtitles);
-        writeCensorBars(censorFilePath, videoFilePath, censorBarsJson, bars);
+        if (saveCensorSource) {
+            writeCensorBars(censorFilePath, videoFilePath, censorBarsJson, bars);
+        } else {
+            // Bake only mode: the bars live in the pixels now, so neither the
+            // geometry nor the uncensored copy is worth keeping.
+            discardCensorSources(censorFilePath, videoFilePath);
+        }
 
         if (config.audioNormalizeOnFinalize) {
             await normalizeVideo(videoFilePath, config, audioTrackIndex);
@@ -1813,11 +1852,11 @@ ipcMain.handle('openImageFile', async () => {
 
 
 
-ipcMain.handle('showConfirmDialog', async (event, { message }) => {
+ipcMain.handle('showConfirmDialog', async (event, { message, buttons, defaultId }: { message: string; buttons?: string[]; defaultId?: number }) => {
     const result = await dialog.showMessageBox(mainWindow!, {
         type: 'question',
-        buttons: ['Cancel', 'OK'],
-        defaultId: 1,
+        buttons: Array.isArray(buttons) && buttons.length > 0 ? buttons : ['Cancel', 'OK'],
+        defaultId: typeof defaultId === 'number' ? defaultId : 1,
         cancelId: 0,
         message,
     });

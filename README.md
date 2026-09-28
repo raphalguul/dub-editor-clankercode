@@ -71,6 +71,17 @@ You can also choose between different types of censoring. Note that gaussian blu
 
 Censor bars are currently static. There is no keyframe animation. If you want to move the bar you can create aditional bars and place them in the new positions, then time them such that one appears after the other.
 
+### Censor Bar Storage
+
+Finalizing a clip bakes the bars into the video either way. What differs is what Dub Editor keeps around it, and that choice is made in Settings under Censoring:
+
+| Storage | What is saved | Reversible | Workspace space |
+|---------|---------------|------------|-----------------|
+| Keep an uncensored copy | censored clip + uncensored master + bar data | yes, bars can be moved, resized or removed later | roughly 2x for censored clips |
+| Bake bars into the video only | censored clip | no, you would have to import the original video again | 1x |
+
+Neither option changes the size of the exported clip pack: the pack always contains the censored video only. On your first censored clip you are asked which one to use and the answer becomes the default, but you can switch at any time in Settings. Switching to bake only does not remove masters that already exist; the next time you finalize such a clip you are asked whether to keep or delete the uncensored copy.
+
 ## Keyboard Shortcuts
 
 | Key        | Function      |

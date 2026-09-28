@@ -105,6 +105,34 @@ const WHISPER_MODEL_HELP = (
     </>
 );
 
+const CENSOR_MODE_HELP = (
+    <>
+        <h4>Censor Bar Storage</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            <strong>Keep an uncensored copy</strong> saves the uncensored video
+            and the censor bar data next to every censored clip, so you can
+            reopen the clip and move, resize or remove the bars at any time.
+            Censored clips take roughly twice as much space in your workspace.
+        </p>
+        <p style={{ fontSize: '0.8rem' }}>
+            <strong>Bake only</strong> saves just the censored clip. Nothing
+            else is kept, so the bars cannot be changed or removed afterwards
+            and you would have to import the original video again. This is the
+            smaller option.
+        </p>
+        <p style={{ fontSize: '0.8rem' }}>
+            Either way the exported clip pack contains the censored video only,
+            so this setting does not change the size of the pack.
+        </p>
+    </>
+);
+
+const CENSOR_MODES = [
+    ['', 'Ask me each time (no default)'],
+    ['saveSource', 'Keep an uncensored copy (reversible)'],
+    ['bakeOnly', 'Bake bars into the video only (not reversible)'],
+];
+
 const Config = (props) => {
     const [config, setConfig] = useState({});
     const [error, setError] = useState(null);
@@ -181,6 +209,30 @@ const Config = (props) => {
                 <span style={{ marginLeft: '8px', minWidth: '50px', display: 'inline-block' }}>
                     {config[field]}
                 </span>
+            </td>
+        </tr>
+    );
+
+    const selectRow = (label, field, options, fallback, helpText) => (
+        <tr>
+            <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
+                {label} <HelpButton helpText={helpText} />
+            </td>
+            <td style={{ textAlign: 'left', paddingLeft: '10px' }}>
+                <select
+                    value={config[field] ?? fallback}
+                    onChange={({ target: { value } }) => {
+                        let nc = { ...config, [field]: value === '' ? null : value };
+                        setConfig(nc);
+                        save(nc);
+                    }}
+                >
+                    {options.map(([value, text]) => (
+                        <option key={value} value={value}>
+                            {text}
+                        </option>
+                    ))}
+                </select>
             </td>
         </tr>
     );
@@ -316,6 +368,23 @@ const Config = (props) => {
         </div>
     );
 
+    const censorSection = (
+        <div style={{ marginTop: '30px' }}>
+            <h4>Censoring</h4>
+            <table style={{ margin: 'auto' }}>
+                <tbody>
+                    {selectRow(
+                        'Censor Bar Storage',
+                        'censorMode',
+                        CENSOR_MODES,
+                        '',
+                        CENSOR_MODE_HELP
+                    )}
+                </tbody>
+            </table>
+        </div>
+    );
+
     const otherConfig = (
         <table style={{ margin: 'auto' }}>
             <tbody>
@@ -373,6 +442,7 @@ const Config = (props) => {
                 </tbody>
             </table>
             {otherConfig}
+            {censorSection}
             {audioSection}
             {whisperSection}
             {props.onRefresh ? (

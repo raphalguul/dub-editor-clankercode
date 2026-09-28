@@ -44,7 +44,9 @@ let AdvancedEditor = () => {
     const [videoSource, setVideoSource] = useState('');
     const [subs, setSubs] = useState([]);
     const [censorBars, setCensorBars] = useState([]);
-    const [censorSourceMissing, setCensorSourceMissing] = useState(false);
+    const [hasCensorSource, setHasCensorSource] = useState(false);
+    const [hasCensorData, setHasCensorData] = useState(false);
+    const [censorModePrompt, setCensorModePrompt] = useState(null);
     const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
     const [activeTab, setActiveTab] = useState('subtitles');
 
@@ -72,7 +74,7 @@ let AdvancedEditor = () => {
     const [playbackSource, setPlaybackSource] = useState('');
     const playbackSourceRef = useRef('');
     const [substitution] = useState('');
-    const [, setButtonsDisabled] = useState(false);
+    const [buttonsDisabled, setButtonsDisabled] = useState(false);
     const [playerKey, setPlayerKey] = useState(0);
     const [trackKey, setTrackKey] = useState(0);
 
@@ -427,7 +429,8 @@ let AdvancedEditor = () => {
             )
         );
 
-        setCensorSourceMissing(!!videoDetails.censorSourceMissing);
+        setHasCensorSource(!!videoDetails.hasCensorSource);
+        setHasCensorData(!!videoDetails.hasCensorData);
 
         if (subtitles.length > 0) {
             setCurrentSub(0);
@@ -485,6 +488,15 @@ let AdvancedEditor = () => {
     };
 
     const getNextBatch = async () => {
+        // The batch advances by remounting the editor, so clear anything left
+        // over from the previous clip before the next one loads. A stale bar
+        // list or sidecar flag would otherwise leak into this clip and get
+        // written out on finalize.
+        setSubs([]);
+        setCensorBars([]);
+        setHasCensorSource(false);
+        setHasCensorData(false);
+
         let batchClip = await handleInterstitial(
             BatchAPI.nextBatchClip(),
             (isOpen) => {
@@ -624,7 +636,79 @@ let AdvancedEditor = () => {
         setIsPlaying(false);
     };
 
-    let addVideoToGame = async (videoName, clipNumber, collectionId) => {
+    const chooseCensorMode = () =>
+        new Promise((resolve) => setCensorModePrompt({ resolve }));
+
+    const resolveCensorMode = (mode) => {
+        if (!censorModePrompt) {
+            return;
+        }
+        const { resolve } = censorModePrompt;
+        setCensorModePrompt(null);
+        resolve(mode);
+    };
+
+    // Runs before the finalize interstitial is raised, otherwise the full screen
+    // spinner would sit on top of these questions. Returns null if the user
+    // backed out.
+    const confirmCensorFinalize = async () => {
+        const noKeep = { keepCensorSource: false };
+        if (censorBars.length === 0) {
+            return noKeep;
+        }
+
+        const config = await ConfigAPI.getConfig();
+        let censorMode = config.censorMode;
+        if (!censorMode) {
+            // First censored finalize on this install. The answer becomes the
+            // new default, so this only happens once.
+            censorMode = await chooseCensorMode();
+            if (!censorMode) {
+                return null;
+            }
+            await ConfigAPI.storeConfig({ censorMode });
+        }
+
+        const bakeOnly = censorMode === 'bakeOnly';
+        let keepCensorSource = false;
+        if (bakeOnly && isEdit && hasCensorSource) {
+            keepCensorSource = await window.api.send('showConfirmDialog', {
+                message:
+                    'This clip still has an uncensored copy left over from an earlier finalize.\n\n' +
+                    'Censor Bar Storage is set to bake only, so it is normally dropped to save space. ' +
+                    'Keeping it means you can still reopen the clip and move or remove the bars, but it keeps costing about twice the space.\n\n' +
+                    'Delete the uncensored copy and the saved bar data?',
+                buttons: ['Keep Uncensored Copy', 'Delete It'],
+                defaultId: 0,
+            });
+        }
+
+        if (isEdit && !hasCensorSource && (hasCensorData || bakeOnly)) {
+            // In bake only mode there is no sidecar to prove the clip was ever
+            // censored, so the wording stays true either way.
+            const confirmed = await window.api.send('showConfirmDialog', {
+                message: bakeOnly
+                    ? 'This clip has no uncensored copy, so there is nothing to fall back on.\n\n' +
+                      'If any bars are already baked into the video they stay in the picture, and your bars are baked on top of them, ' +
+                      'permanently stacking the blur and box edges. This cannot be undone.'
+                    : 'The uncensored master for this clip is missing, so the existing censor bars are already burned into the video.\n\n' +
+                      'Finalizing now will bake the new bars on top of the burned-in ones, permanently stacking the blur and box edges. ' +
+                      'This cannot be undone.',
+            });
+            if (!confirmed) {
+                return null;
+            }
+        }
+
+        return { keepCensorSource };
+    };
+
+    let addVideoToGame = async (
+        videoName,
+        clipNumber,
+        collectionId,
+        keepCensorSource
+    ) => {
         const config = await ConfigAPI.getConfig();
         if (
             config.checkSpeakersOnFinalize !== false &&
@@ -634,18 +718,6 @@ let AdvancedEditor = () => {
                 'showConfirmDialog',
                 { message: 'No speakers are defined. Finalize anyway?' }
             );
-            if (!confirmed) {
-                return;
-            }
-        }
-
-        if (censorSourceMissing && censorBars.length > 0) {
-            const confirmed = await window.api.send('showConfirmDialog', {
-                message:
-                    'The uncensored master for this clip is missing, so the existing censor bars are already burned into the video.\n\n' +
-                    'Finalizing now will bake the new bars on top of the burned-in ones, permanently stacking the blur and box edges. ' +
-                    'This cannot be undone.',
-            });
             if (!confirmed) {
                 return;
             }
@@ -696,7 +768,8 @@ let AdvancedEditor = () => {
                 params.type,
                 isBatch,
                 selectedAudioTrack,
-                censorBars
+                censorBars,
+                keepCensorSource
             );
             if (!collectionId.startsWith('_')) {
                 await CollectionAPI.addToCollection(
@@ -708,19 +781,26 @@ let AdvancedEditor = () => {
             setButtonsDisabled(false);
 
             toast(`Clip added successfully!`, { type: 'info' });
-            if (!isBatch) {
-                navigate('/');
-            } else {
-                let hasBatch = await BatchAPI.hasBatch();
-                if (hasBatch > 0) {
-                    navigate(`/create?batch=true`);
-                } else {
-                    navigate('/');
-                }
+
+            // Go straight to the destination. Navigating to '/' relied on the
+            // catch all <Navigate> in App.jsx, and that two hop bounce was
+            // getting dropped when reached from this async continuation, which
+            // left the editor on screen after a successful finalize.
+            let destination = '/videos';
+            if (isBatch && (await BatchAPI.hasBatch()) > 0) {
+                destination = '/create?batch=true';
             }
+            navigate(destination);
         } catch (error) {
             console.error(error);
+            await window.api
+                .send('log', `Clip add failed: ${error?.stack || error}`)
+                .catch(() => {});
             toast(`Clip add failed!`, { type: 'error' });
+        } finally {
+            // Without this the Finalize button stays dead whenever addVideo
+            // throws, since the reset above is never reached.
+            setButtonsDisabled(false);
         }
     };
 
@@ -1029,17 +1109,36 @@ currentBarIndex={currentCensor}
                             onSubsChange={subChangeHandler}
                             onSelectSub={setCurrentSub}
                             onSelectCensorBar={handleCensorSelect}
-                            onSave={(title, number, collectionId) => {
-                                handleInterstitial(
-                                    addVideoToGame(title, number, collectionId),
-                                    (isOpen) => {
-                                        setInterstitialState({
-                                            isOpen,
-                                            message:
-                                                'Creating clip and adding subs...',
-                                        });
+                            buttonsDisabled={buttonsDisabled}
+                            onSave={async (title, number, collectionId) => {
+                                if (buttonsDisabled) {
+                                    return;
+                                }
+                                setButtonsDisabled(true);
+                                try {
+                                    const censorSettings =
+                                        await confirmCensorFinalize();
+                                    if (!censorSettings) {
+                                        return;
                                     }
-                                );
+                                    await handleInterstitial(
+                                        addVideoToGame(
+                                            title,
+                                            number,
+                                            collectionId,
+                                            censorSettings.keepCensorSource
+                                        ),
+                                        (isOpen) => {
+                                            setInterstitialState({
+                                                isOpen,
+                                                message:
+                                                    'Creating clip and adding subs...',
+                                            });
+                                        }
+                                    );
+                                } finally {
+                                    setButtonsDisabled(false);
+                                }
                             }}
                         />
                     </div>
@@ -1076,6 +1175,64 @@ currentBarIndex={currentCensor}
                     <Link to="/">
                         <button type="button">Cancel</button>
                     </Link>
+                </div>
+            )}
+            {censorModePrompt && (
+                <div
+                    className="modal-overlay"
+                    onClick={() => resolveCensorMode(null)}
+                >
+                    <div
+                        className="modal modal-wide"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h4>Censor Bar Storage</h4>
+                        <p>
+                            This is your first clip with censor bars, so choose
+                            how Dub Editor should store them. You can change
+                            this at any time in Settings.
+                        </p>
+                        <button
+                            className="censor-mode-option"
+                            onClick={() => resolveCensorMode('saveSource')}
+                        >
+                            <strong>
+                                Keep an uncensored copy (reversible)
+                            </strong>
+                            <span>
+                                Saves the uncensored video and the bar data
+                                next to the clip, so you can reopen the clip and
+                                move, resize or remove the bars later. Censored
+                                clips take roughly twice as much space in your
+                                workspace.
+                            </span>
+                        </button>
+                        <button
+                            className="censor-mode-option"
+                            onClick={() => resolveCensorMode('bakeOnly')}
+                        >
+                            <strong>
+                                Bake bars into the video only (not reversible)
+                            </strong>
+                            <span>
+                                Saves only the censored clip. Nothing else is
+                                kept, so the bars cannot be changed or removed
+                                afterwards and you would have to import the
+                                original video again. Uses the least space in
+                                your workspace.
+                            </span>
+                        </button>
+                        <p>
+                            Either way the exported clip pack contains the
+                            censored video only, so this choice does not change
+                            the size of the pack.
+                        </p>
+                        <div className="modal-buttons">
+                            <button onClick={() => resolveCensorMode(null)}>
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
