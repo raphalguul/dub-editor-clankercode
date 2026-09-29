@@ -432,7 +432,7 @@ const createThumbnail = async (videoFilePath: string, thumbnailTime: string, thu
 
 const NORMALIZED_MARKER_SUFFIX = '.normalized';
 
-const normalizeVideo = async (videoPath: string, cfg: any, audioTrackIndex?: number): Promise<boolean> => {
+const normalizeVideo = async (videoPath: string, cfg: any): Promise<boolean> => {
     const markerPath = videoPath + NORMALIZED_MARKER_SUFFIX;
 
 if (fs.existsSync(markerPath)) {
@@ -453,18 +453,31 @@ if (fs.existsSync(markerPath)) {
     }
 
     let duration: number;
+    let hasAudio: boolean;
     try {
-        duration = await new Promise<number>((resolve, reject) => {
+        const probed = await new Promise<{duration: number; hasAudio: boolean}>((resolve, reject) => {
             ffmpeg.ffprobe(videoPath, (err: any, metadata: any) => {
                 if (err) {
                     reject(err);
                 } else {
-                    resolve(parseFloat(metadata.format?.duration || '0'));
+                    resolve({
+                        duration: parseFloat(metadata.format?.duration || '0'),
+                        hasAudio: (metadata.streams || []).some(
+                            (s: any) => s.codec_type === 'audio'
+                        ),
+                    });
                 }
             });
         });
+        duration = probed.duration;
+        hasAudio = probed.hasAudio;
     } catch (err) {
         log.warn('ffprobe failed, skipping normalization: ' + err);
+        return true;
+    }
+
+    if (!hasAudio) {
+        log.info('No audio stream to normalize: ' + videoPath);
         return true;
     }
 
@@ -499,11 +512,10 @@ if (fs.existsSync(markerPath)) {
                     .audioFrequency(44100)
                     .setDuration(duration);
 
-                const normOpts: string[] = [];
-                if (audioTrackIndex !== undefined) {
-                    normOpts.push('-map', '0:v:0', '-map', `0:${audioTrackIndex}`);
-                }
-                if (normOpts.length > 0) { cmd = cmd.outputOptions(normOpts); }
+                // The clip on disk has exactly one video and one audio stream, so
+                // select by type rather than by the source's absolute stream
+                // index -- that index no longer exists after trimming or copying.
+                cmd = cmd.outputOptions(['-map', '0:v:0', '-map', '0:a:0']);
 
                 if (filterChain.length > 0) {
                     cmd.audioFilters(filterChain.join(','));
@@ -596,6 +608,14 @@ const getClipPaths = (videoId: string, game: string): ClipPaths => {
     }
 }
 
+const saveCollections = () => {
+    const {collectionMeta} = getConfigDirectories();
+
+    log.info("WRITING TO " + collectionMeta);
+
+    fs.writeFileSync(collectionMeta, JSON.stringify(collections, null, 5));
+}
+
 const addToCollection = (
     game: string,
     collectionId: string,
@@ -617,12 +637,7 @@ const addToCollection = (
         }
     });
 
-    const {collectionMeta} = getConfigDirectories();
-
-    log.info("WRITING TO " + collectionMeta);
-
-    // Store updated file
-    fs.writeFileSync(collectionMeta, JSON.stringify(collections, null, 5));
+    saveCollections();
     return collections[game];
 };
 
@@ -642,13 +657,7 @@ const removeFromCollection = (game: string, collectionId: string, videoId: strin
         (element: string) => element !== videoId
     );
 
-    const {collectionMeta} = getConfigDirectories();
-
-    // Store updated file
-    fs.writeFileSync(
-        collectionMeta,
-        JSON.stringify(collections, null, 5)
-    );
+    saveCollections();
 }
 
 const importZip = async (filePath: string, game: string) => {
@@ -932,6 +941,11 @@ const deleteClip = (id: string, game: string) => {
             collectionId
         ].filter((videoId: string) => videoId !== id);
     });
+
+    // Persist here rather than relying on the caller: deleting a single clip
+    // dropped the id from memory only, so the pack listed a file that no
+    // longer existed after a restart.
+    saveCollections();
 };
 
 const createMetaDataFiles = () => {
@@ -1406,7 +1420,7 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
         }
 
         if (config.audioNormalizeOnFinalize) {
-            normalizeVideo(videoFilePath, config, audioTrackIndex);
+            await normalizeVideo(videoFilePath, config);
         }
 
         // Remove the clip from batch on completion
@@ -1428,8 +1442,9 @@ ipcMain.handle('clearBatchCache', (_event) => {
         clips: [],
         video: null,
     };
+    const {batchCacheMeta} = getConfigDirectories();
     fs.writeFileSync(
-        BATCH_CACHE_FILE,
+        batchCacheMeta,
         Buffer.from(JSON.stringify(batchCache, null, 5))
     );
 });
@@ -1541,8 +1556,15 @@ ipcMain.handle(
         renameIfPresent(getCensorSourcePath(videoFilePath), getCensorSourcePath(newVideoFilePath));
         renameIfPresent(thumbNailPath, newThumbNailPath);
 
-        removeFromCollection(game, collectionId, id);
-        addToCollection(game, collectionId, [newId]);
+        // A clip in no pack arrives with no collectionId. Passing that straight
+        // through made addToCollection invent a pack literally named
+        // "undefined" and persist it, so leave unsorted clips unsorted.
+        if (collectionId) {
+            removeFromCollection(game, collectionId, id);
+            addToCollection(game, collectionId, [newId]);
+        } else {
+            log.info('Clip is not in a collection, skipping collection update');
+        }
     }
 );
 
@@ -1638,7 +1660,7 @@ ipcMain.handle(
         }
 
         if (config.audioNormalizeOnFinalize) {
-            await normalizeVideo(videoFilePath, config, audioTrackIndex);
+            await normalizeVideo(videoFilePath, config);
         }
 
         return id;
@@ -1712,13 +1734,7 @@ ipcMain.handle(
         log.info("DELETING PREVIEW IMAGE: " + previewImagePath);
 
         delete collections[game][collectionId];
-        const {collectionMeta} = getConfigDirectories();
-
-        // Store updated file
-        fs.writeFileSync(
-            collectionMeta,
-            JSON.stringify(collections, null, 5)
-        );
+        saveCollections();
 
         return collections[game];
     }

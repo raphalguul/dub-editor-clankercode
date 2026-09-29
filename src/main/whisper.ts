@@ -461,12 +461,22 @@ async function transcribe(
         if (err) {
           if (useCuda && config.cudaFallbackCpu) {
             onLog?.('CUDA failed, retrying with CPU...');
-            const cpuExe = path.join(getCpuBinaryDir(), 'whisper.cpp.exe');
-            if (fs.existsSync(cpuExe)) {
+            // The CPU binary is only ever downloaded on the !useCuda branch, so
+            // on a machine that has never transcribed before there is nothing
+            // to fall back to. Download it here rather than bailing out.
+            findOrDownloadCpuBinary(onLog).then((cpuExe) => {
+              if (!cpuExe) {
+                onLog?.('No CPU binary available for fallback');
+                rej(err);
+                return;
+              }
+              const cpuDir = path.dirname(cpuExe);
+              const cpuEnv = { ...process.env };
+              cpuEnv.PATH = cpuDir + path.delimiter + (cpuEnv.PATH || '');
               const cpuArgs = [...args];
               if (!cpuArgs.includes('-ng')) cpuArgs.push('-ng');
               execFile(cpuExe, cpuArgs, {
-                env,
+                env: cpuEnv,
                 timeout: 300000,
                 maxBuffer: 50 * 1024 * 1024,
               }, (cpuErr, cpuStdout, cpuStderr) => {
@@ -474,8 +484,11 @@ async function transcribe(
                 if (cpuErr) rej(cpuErr);
                 else res();
               });
-              return;
-            }
+            }).catch((dlErr) => {
+              onLog?.('CPU fallback download failed: ' + dlErr);
+              rej(err);
+            });
+            return;
           }
           rej(err);
         } else {
