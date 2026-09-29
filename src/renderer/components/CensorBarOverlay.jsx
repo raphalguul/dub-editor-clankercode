@@ -97,6 +97,8 @@ export default ({
     videoRef,
     onChange,
     onSelect,
+    barVisibility,
+    videoLengthMs,
 }) => {
     const containerRef = useRef(null);
     const dragRef = useRef(null);
@@ -302,8 +304,11 @@ export default ({
     const visibleBars = (bars || []).filter((bar) => {
         const active =
             currentPosition >= bar.startTime && currentPosition <= bar.endTime;
+        const atEnd = videoLengthMs && currentPosition >= videoLengthMs - 100;
+        const barEndsAtVideoEnd = videoLengthMs && bar.endTime >= videoLengthMs - 100;
+        const activeAtEnd = atEnd && barEndsAtVideoEnd;
         const selected = bar.index === selectedIndex;
-        return active || selected;
+        return active || activeAtEnd || selected;
     });
 
     // Pin the overlay to the video's drawn picture so coordinates stay true under
@@ -329,20 +334,20 @@ export default ({
         <div className="censor-bar-overlay" ref={containerRef} style={overlayStyle}>
             {visibleBars.map((bar) => {
                 const isSelected = bar.index === selectedIndex;
-                const isActive =
-                    currentPosition >= bar.startTime &&
-                    currentPosition <= bar.endTime;
 
                 // Three states:
-                // - Active (playhead in range): full fill
-                // - Selected + inactive: outline + handles only (no fill)
+                // - Active (playhead in range) + preview ON: full fill
+                // - Active at video end (paused at end) + preview ON: full fill
+                // - Preview OFF: never fill, outline when selected
                 // - Inactive + unselected: hidden (filtered out above)
                 const isActiveNow =
                     currentPosition >= bar.startTime &&
                     currentPosition <= bar.endTime;
-                const isSelectedNow = bar.index === selectedIndex;
-                const showFill = isActiveNow;
-                const showOutline = isSelected && !isActiveNow;
+                const atEnd = videoLengthMs && currentPosition >= videoLengthMs - 100;
+                const barEndsAtVideoEnd = videoLengthMs && bar.endTime >= videoLengthMs - 100;
+                const isActiveAtEnd = atEnd && barEndsAtVideoEnd;
+                const showPreview = barVisibility?.get(bar.index) !== false;
+                const showFill = (isActiveNow || isActiveAtEnd) && showPreview;
                 const showHandles = isSelected;
 
                 // Blur radius is stored as a fraction of frame width so the

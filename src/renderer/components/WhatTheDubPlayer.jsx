@@ -269,6 +269,8 @@ export default (props) => {
                         videoRef={videoElement}
                         onChange={props.onCensorBarChange}
                         onSelect={props.onSelectCensorBar}
+                        barVisibility={props.censorBarVisibility}
+                        videoLengthMs={props.videoLengthMs}
                     />
                     </>
                 ) : null}
@@ -339,6 +341,8 @@ export default (props) => {
                     videoRef={videoElement}
                     onChange={props.onCensorBarChange}
                     onSelect={props.onSelectCensorBar}
+                    barVisibility={props.censorBarVisibility}
+                    videoLengthMs={props.videoLengthMs}
                 />
                 </>
             ) : null}

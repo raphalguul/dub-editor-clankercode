@@ -86,7 +86,6 @@ let AdvancedEditor = () => {
 
     const [videoLength, setVideoLength] = useState(0);
 
-    let videoLengthMs = videoLength * 1000;
     let defaultClipSize = 8000; // 8 seconds
 
     let isBatch = searchParams.get('batch') === 'true';
@@ -1042,7 +1041,7 @@ let AdvancedEditor = () => {
         return <div>Loading Video...</div>;
     }
 
-    return (
+return (
         <div>
             <div style={{ color: 'red' }}>{error}</div>
             {videoSource ? (
@@ -1065,12 +1064,14 @@ let AdvancedEditor = () => {
                             subs={subs}
                             censorBars={censorBars}
                             censorBarPosition={currentSliderPosition - offset}
-currentBarIndex={currentCensor}
+                            currentBarIndex={currentCensor}
                             isCensorTab={isCensorTab}
                             onCensorBarChange={censorBarChangeHandler}
                             onSelectCensorBar={handleCensorSelect}
                             offset={offset}
                             substitution={substitution}
+                            censorBarVisibility={new Map(censorBars.map((b) => [b.index, b.showPreview !== false]))}
+                            videoLengthMs={videoLength * 1000}
                             onEnd={() => {
                                 setIsPlaying(false);
                                 setCurrentSliderPosition(stateRef.current.offset + stateRef.current.videoLength * 1000 + 15);

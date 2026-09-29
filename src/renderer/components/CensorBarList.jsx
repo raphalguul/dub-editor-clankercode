@@ -159,11 +159,13 @@ export default ({
                             <th>In</th>
                             <th>Out</th>
                             <th>Type</th>
+                            <th>Preview</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
                         {censorBars.map((bar) => {
+                            const showPreview = bar.showPreview !== false;
                             return (
                                 <tr
                                     key={bar.index}
@@ -189,6 +191,20 @@ export default ({
                                         )}
                                     </td>
                                     <td>{bar.type}</td>
+                                    <td style={{ textAlign: 'center' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={showPreview}
+                                            onChange={(e) => {
+                                                onCensorBarsChange('edit', {
+                                                    ...bar,
+                                                    showPreview: e.target.checked,
+                                                });
+                                                e.stopPropagation();
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                    </td>
                                     <td>
                                         <button
                                             onClick={(e) => {
@@ -217,16 +233,34 @@ export default ({
                         (bar) => bar.startTime > startTime
                     );
                     let maxEnd = nextBar ? nextBar.startTime : videoLengthMs;
+
+                    // If playhead is at or near the end, create a bar that ends at the video end
+                    // with a minimum duration, similar to how subtitles work
+                    if (startTime >= videoLengthMs - MIN_BAR_LENGTH_MS) {
+                        startTime = Math.max(0, videoLengthMs - defaultBarSize);
+                    }
+
                     let endTime = Math.min(
                         startTime + defaultBarSize,
                         maxEnd
                     );
+
+                    // Ensure minimum bar length
+                    if (endTime - startTime < MIN_BAR_LENGTH_MS) {
+                        endTime = startTime + MIN_BAR_LENGTH_MS;
+                    }
+                    if (endTime > videoLengthMs) {
+                        endTime = videoLengthMs;
+                        startTime = Math.max(0, endTime - defaultBarSize);
+                    }
+
                     onCensorBarsChange(
                         'add',
                         createCensorBar({
                             startTime,
                             endTime,
                             rowIndex: currentRow,
+                            showPreview: true,
                             ...(newBarDefaults || {}),
                         })
                     );
