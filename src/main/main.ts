@@ -29,6 +29,7 @@ import { ClipPaths, DirectoryList } from './types';
 import * as whisper from './whisper';
 import { isCompatible, convertToCompatible, probeMediaInfo, AudioTrackInfo } from './videoFormat';
 import { buildCensorFilterGraph, buildCensorOutputMaps, CensorBar } from './censorFilter';
+import { sanitizeClipTitle } from './clipNaming';
 
 const ffmpeg = require('fluent-ffmpeg');
 const StreamZip = require('node-stream-zip');
@@ -410,7 +411,7 @@ const trimAndWriteVideo = async (
 }
 
 const createClipName = (title: string, clipNumber: number) => {
-    return '_' + title.replace(' ', '_') + `-Clip${`${clipNumber}`.padStart(3, '0')}`;
+    return '_' + sanitizeClipTitle(title).replace(' ', '_') + `-Clip${`${clipNumber}`.padStart(3, '0')}`;
 };
 
 const createThumbnail = async (videoFilePath: string, thumbnailTime: string, thumbFilePath: string) => {
@@ -1547,7 +1548,7 @@ ipcMain.handle(
             `RENAMING ${id} to new title ${newTitle} in collection ${collectionId} for game ${game}`
         );
 
-        const newId = newTitle.replaceAll(' ', '_');
+        const newId = sanitizeClipTitle(newTitle).replaceAll(' ', '_');
 
         const {clip: videoFilePath, subtitle: subFilePath, censorBars: censorFilePath, thumbnail: thumbNailPath} = getClipPaths(id, game);
         const {clip: newVideoFilePath, subtitle: newSubFilePath, censorBars: newCensorFilePath, thumbnail: newThumbNailPath} = getClipPaths(newId, game);

@@ -191,7 +191,7 @@ export default ({
                                         style={{ height: '10vh' }}
                                     >
                                         <img
-                                            src={`game://${game}/${video._id}.jpg`}
+                                            src={`game://${game}/${encodeURIComponent(video._id)}.jpg`}
                                         />
                                     </div>
                                 </div>

@@ -803,7 +803,7 @@ let AdvancedEditor = () => {
             }
             setButtonsDisabled(false);
 
-            toast(`Clip added successfully!`, { type: 'info' });
+            toast(`Clip added successfully as ${videoId}`, { type: 'info' });
 
             // Go straight to the destination. Navigating to '/' relied on the
             // catch all <Navigate> in App.jsx, and that two hop bounce was

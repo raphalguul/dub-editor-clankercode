@@ -10,6 +10,7 @@ import {
     toOverlayBox,
     decodeBase64Utf8,
 } from '../renderer/util/VideoTools';
+import { sanitizeClipTitle } from '../main/clipNaming';
 import { version } from '../../release/app/package.json';
 
 const subtitles = [
@@ -345,5 +346,55 @@ describe('SRT utf-8 handling', () => {
 
         const parsed = convertSrtToSubtitles(toBase64(srt)) as any[];
         expect(parsed[0].text).toBe(TEXT);
+    });
+});
+
+describe('sanitizeClipTitle', () => {
+    it('leaves an ordinary title untouched', () => {
+        expect(sanitizeClipTitle('The Office S1E1')).toBe('The Office S1E1');
+        expect(sanitizeClipTitle('Ricky and Morty - 1080p')).toBe(
+            'Ricky and Morty - 1080p'
+        );
+    });
+
+    it('strips characters Windows will not accept in a filename', () => {
+        expect(sanitizeClipTitle('a<b>c:d"e/f\\g|h?i*j')).toBe('a b c d e f g h i j');
+    });
+
+    it('replaces control characters and collapses whitespace', () => {
+        expect(sanitizeClipTitle('two\nlines\ttabbed')).toBe('two lines tabbed');
+        expect(sanitizeClipTitle('spaced   out')).toBe('spaced out');
+    });
+
+    it('trims trailing dots and spaces, which Windows silently drops', () => {
+        expect(sanitizeClipTitle('Trailing dot.')).toBe('Trailing dot');
+        expect(sanitizeClipTitle('Trailing space ')).toBe('Trailing space');
+    });
+
+    it('prefixes reserved Windows device names', () => {
+        expect(sanitizeClipTitle('CON')).toBe('_CON');
+        expect(sanitizeClipTitle('nul')).toBe('_nul');
+        expect(sanitizeClipTitle('COM1')).toBe('_COM1');
+    });
+
+    it('does not mangle a title that merely starts like a device name', () => {
+        expect(sanitizeClipTitle('Console')).toBe('Console');
+        expect(sanitizeClipTitle('COM10')).toBe('COM10');
+    });
+
+    it('caps a very long title and keeps the cut clean', () => {
+        const long = 'x'.repeat(400) + '   ';
+        const result = sanitizeClipTitle(long);
+        expect(result.length).toBeLessThanOrEqual(120);
+        expect(result.endsWith('.')).toBe(false);
+        expect(result.endsWith(' ')).toBe(false);
+    });
+
+    it('falls back when nothing usable survives sanitizing', () => {
+        expect(sanitizeClipTitle('???')).toBe('Untitled');
+        expect(sanitizeClipTitle('   ')).toBe('Untitled');
+        expect(sanitizeClipTitle('')).toBe('Untitled');
+        expect(sanitizeClipTitle(undefined)).toBe('Untitled');
+        expect(sanitizeClipTitle('???', 'Clip')).toBe('Clip');
     });
 });
