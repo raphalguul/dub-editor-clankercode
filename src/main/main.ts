@@ -1402,6 +1402,13 @@ ipcMain.handle('processBatchClip', async (event, {videoSource, subtitles, subtit
         const sourceFile = fromLocalfileUrl(videoSource);
         const saveCensorSource = config.censorMode !== 'bakeOnly';
 
+        // Debug: log clip timing to catch duration bugs
+        const clipDuration = clip.endTime - clip.startTime;
+        log.info(`BATCH CLIP TIMING: start=${clip.startTime} end=${clip.endTime} duration=${clipDuration}ms bars=${bars.length}`);
+        if (clipDuration <= 0) {
+            log.warn(`BATCH CLIP INVERTED/ZERO DURATION: start=${clip.startTime} end=${clip.endTime}, will encode to end of source!`);
+        }
+
         if (bars.length > 0) {
             if (saveCensorSource) {
                 // Two passes: keep a trimmed, uncensored master so later geometry
@@ -1948,6 +1955,8 @@ ipcMain.handle('normalizeCollection', async (event, { collectionId, game }) => {
 });
 
 ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConfig, startTime, endTime, audioTrackIndex }) => {
+    log.info(`TRANSCRIBE: path=${videoPath} startTime=${startTime} endTime=${endTime} duration=${startTime !== undefined && endTime !== undefined ? (endTime - startTime) / 1000 : 'full'}s track=${audioTrackIndex}`);
+
     let resolvedPath = videoPath;
 
     if (resolvedPath.startsWith('game://')) {
