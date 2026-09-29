@@ -75,9 +75,19 @@ let VideoList = () => {
                     <button>New Batch</button>
                 </Link>
                 {batchCount > 0 ? (
-                    <Link to={`/create?batch=true`}>
-                        <button>Continue Batch ({batchCount})</button>
-                    </Link>
+                    <>
+                        <Link to={`/create?batch=true`}>
+                            <button>Continue Batch ({batchCount})</button>
+                        </Link>
+                        <button
+                            onClick={async () => {
+                                await BatchAPI.clearBatchCache();
+                                setBatchCount(0);
+                            }}
+                        >
+                            Discard Batch
+                        </button>
+                    </>
                 ) : null}
             </div>
             <ClipTable

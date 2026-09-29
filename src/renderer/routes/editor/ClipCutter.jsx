@@ -322,7 +322,7 @@ let ClipCutter = () => {
             let clipList = [...stateRef.current.clips, clip]
                 .sort((a, b) => a.startTime - b.startTime)
                 .map((modifiedClip, index) => {
-                    if (!modifiedClip.index) {
+                    if (modifiedClip === clip) {
                         newClipIndex = index;
                     }
                     return {

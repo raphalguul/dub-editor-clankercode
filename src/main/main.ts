@@ -1475,9 +1475,18 @@ ipcMain.handle('getVideo', (event, { id, game }) => {
 
     const {clip: videoFilePath, subtitle: subFilePath, censorBars: censorFilePath} = getClipPaths(id, game);
 
-    const subtitles: string = fs.readFileSync(subFilePath, {
-        encoding: 'base64',
-    });
+    // A clip whose .srt went missing used to throw here, which took the whole
+    // editor down with it and left no way to repair the clip. Open it with an
+    // empty subtitle list instead; storeVideo rewrites the file on finalize.
+    const subtitleMissing = !fs.existsSync(subFilePath);
+    let subtitles = '';
+    if (subtitleMissing) {
+        log.warn('GETVIDEO no subtitle file for ' + id + ', opening with empty subs');
+    } else {
+        subtitles = fs.readFileSync(subFilePath, {
+            encoding: 'base64',
+        });
+    }
 
     // The editor draws its own overlay, so play the uncensored source when we
     // have one, otherwise the baked bars would show up twice.
@@ -1500,6 +1509,7 @@ ipcMain.handle('getVideo', (event, { id, game }) => {
         // that censor bars were ever applied to it.
         hasCensorSource,
         hasCensorData: fs.existsSync(censorFilePath),
+        subtitleMissing,
     };
 });
 

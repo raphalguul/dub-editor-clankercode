@@ -61,12 +61,24 @@ export let convertSubtitlesToSrt = (subtitles, game) => {
     return `${body}\n\n# METADATA: Dub Editor CC${versionTag}`;
 };
 
+// atob returns one character per byte, which mangles anything outside Latin-1
+// and re-encoding the result as UTF-8 on save compounds the damage on every
+// open/save cycle. Decode the bytes as UTF-8 instead.
+export let decodeBase64Utf8 = (base64) => {
+    let binary = atob(base64);
+    let bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+};
+
 export let convertSrtToSubtitles = (srtBase64) => {
     let subtitles = [];
     let subtitle = {};
     let regex = /(\d\d:\d\d:\d\d,\d\d\d) --> (\d\d:\d\d:\d\d,\d\d\d)/;
 
-    let srt = atob(srtBase64).replaceAll('\r', '');
+    let srt = decodeBase64Utf8(srtBase64).replaceAll('\r', '');
     let n = 0;
 
     srt.split('\n').forEach((line) => {

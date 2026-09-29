@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import WhatTheDubPlayer from '../components/WhatTheDubPlayer';
 import { useParams } from 'react-router';
 import { Link } from 'react-router-dom';
-import { convertSrtToSubtitles } from '../util/VideoTools';
+import { convertSrtToSubtitles, decodeBase64Utf8 } from '../util/VideoTools';
 import { useAtom } from 'jotai';
 import { gameAtom } from 'renderer/atoms/game.atom';
 
@@ -52,7 +52,7 @@ let VideoView = () => {
                             controls={true}
                         />
                     </div>
-                    <pre>{atob(videoDetails.srtBase64)}</pre>
+                    <pre>{decodeBase64Utf8(videoDetails.srtBase64)}</pre>
                 </div>
             ) : null}
             <div>

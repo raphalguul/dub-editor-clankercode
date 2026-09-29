@@ -8,6 +8,7 @@ import {
     distributeCensorBars,
     toSquare,
     toOverlayBox,
+    decodeBase64Utf8,
 } from '../renderer/util/VideoTools';
 import { version } from '../../release/app/package.json';
 
@@ -297,5 +298,52 @@ describe('toOverlayBox', () => {
         expect(toOverlayBox(picture, host, {})).toEqual(
             toOverlayBox(picture, host)
         );
+    });
+});
+
+describe('SRT utf-8 handling', () => {
+    // Written as escapes so the fixture survives any editor encoding.
+    const SPEAKER = 'Ren\u00e9e';
+    const TEXT = 'Caf\u00e9 cr\u00e8me na\u00efve \u2014 Gr\u00fc\u00dfe';
+
+    const accented = [
+        {
+            startTime: 0,
+            endTime: 2620,
+            text: TEXT,
+            speaker: SPEAKER,
+            type: 'subtitle',
+            voice: 'female',
+        },
+    ];
+
+    // The main process hands subtitles over as base64 of the raw file bytes.
+    const toBase64 = (srt: string) =>
+        Buffer.from(srt, 'utf8').toString('base64');
+
+    it('decodes base64 as utf-8 rather than one character per byte', () => {
+        expect(decodeBase64Utf8(toBase64(TEXT))).toBe(TEXT);
+    });
+
+    it('round-trips non-ascii subtitle text through base64', () => {
+        const srt = convertSubtitlesToSrt(accented, 'whatthedub');
+        const parsed = convertSrtToSubtitles(toBase64(srt)) as any[];
+
+        expect(parsed).toHaveLength(1);
+        expect(parsed[0].text).toBe(TEXT);
+        expect(parsed[0].speaker).toBe(SPEAKER);
+    });
+
+    it('does not degrade the text over repeated open/save cycles', () => {
+        let srt = convertSubtitlesToSrt(accented, 'whatthedub');
+        for (let i = 0; i < 3; i++) {
+            srt = convertSubtitlesToSrt(
+                convertSrtToSubtitles(toBase64(srt)),
+                'whatthedub'
+            );
+        }
+
+        const parsed = convertSrtToSubtitles(toBase64(srt)) as any[];
+        expect(parsed[0].text).toBe(TEXT);
     });
 });

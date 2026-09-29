@@ -902,7 +902,7 @@ let AdvancedEditor = () => {
             let subList = [...stateRef.current.subs, sub]
                 .sort((a, b) => a.startTime - b.startTime)
                 .map((modifiedSub, index) => {
-                    if (!modifiedSub.index) {
+                    if (modifiedSub === sub) {
                         newSubIndex = index;
                     }
                     return {
@@ -962,16 +962,19 @@ let AdvancedEditor = () => {
     const censorBarChangeHandler = (mode, bar) => {
         if (mode === 'add') {
             let newIndex = 0;
+            // createCensorBar hands back index 0, so an "is this the new bar"
+            // check on the index can never fire. Match on identity instead.
             let barList = [...stateRef.current.censorBars, bar]
                 .sort((a, b) => a.startTime - b.startTime)
                 .map((modifiedBar, index) => {
-                    if (modifiedBar.index === undefined || modifiedBar.index === null) {
+                    if (modifiedBar === bar) {
                         newIndex = index;
                     }
                     return { ...modifiedBar, index };
                 });
             barList = distributeCensorBars(barList);
-            setCurrentSub(newIndex);
+            setCurrentCensor(newIndex);
+            setCurrentSub(null);
             setCensorBars(barList);
         } else if (mode === 'edit') {
             let length = bar.endTime - bar.startTime;
