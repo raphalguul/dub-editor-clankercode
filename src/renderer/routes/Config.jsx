@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import HelpButton from 'renderer/components/HelpButton';
+import {
+    BLUR_AMOUNT_STEP,
+    MAX_BLUR_AMOUNT,
+    MIN_BLUR_AMOUNT,
+} from 'renderer/util/VideoTools';
 
 const WORKSPACE_HELP_TEXT = (
     <>
@@ -124,6 +129,10 @@ const CENSOR_MODE_HELP = (
             Either way the exported clip pack contains the censored video only,
             so this setting does not change the size of the pack.
         </p>
+        <p style={{ fontSize: '0.8rem' }}>
+            <strong>Ask me each time (no default)</strong> shows this popup on
+            every censored finalize until you choose to remember a setting.
+        </p>
     </>
 );
 
@@ -133,6 +142,44 @@ const CENSOR_MODES = [
     ['bakeOnly', 'Bake bars into the video only (not reversible)'],
 ];
 
+const CENSOR_TYPE_HELP = (
+    <>
+        <h4>Default Censor Bar Type</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            The type given to newly added censor bars. Every bar can still be
+            changed individually in the censor bar editor afterwards.
+        </p>
+        <p style={{ fontSize: '0.8rem' }}>
+            <strong>Black Box</strong> covers the region with a solid black
+            rectangle, <strong>Gaussian Blur</strong> blurs it, and{' '}
+            <strong>Delogo</strong> interpolates over it from the surrounding
+            pixels. Blur strength is only used by the blur type.
+        </p>
+    </>
+);
+
+const CENSOR_TYPE_OPTIONS = [
+    ['black', 'Black Box'],
+    ['blur', 'Gaussian Blur'],
+    ['delogo', 'Delogo (Pixel Fill)'],
+];
+
+const CENSOR_BLUR_HELP = (
+    <>
+        <h4>Default Blur Strength</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            The blur given to newly added Gaussian Blur bars, as a fraction of
+            frame width. 2/1000 is a very light blur, 20/1000 is heavy, and
+            200/1000 is about the point where the region is unreadable.
+        </p>
+        <p style={{ fontSize: '0.8rem' }}>
+            This is only a starting point for new bars. Existing bars keep the
+            strength they were saved with, and each bar keeps its own value if
+            you adjust it in the editor.
+        </p>
+    </>
+);
+
 const Config = (props) => {
     const [config, setConfig] = useState({});
     const [error, setError] = useState(null);
@@ -140,7 +187,7 @@ const Config = (props) => {
 
     useEffect(() => {
         getConfig();
-    });
+    }, []);
 
     const updateConfig = (field, value) => {
         const newConfig = { ...config };
@@ -188,7 +235,7 @@ const Config = (props) => {
         </tr>
     );
 
-    const sliderRow = (label, field, min, max, step, helpText) => (
+    const sliderRow = (label, field, min, max, step, helpText, format) => (
         <tr>
             <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
                 {label} <HelpButton helpText={helpText} />
@@ -205,9 +252,10 @@ const Config = (props) => {
                         setConfig(nc);
                     }}
                     onMouseUp={() => save(config)}
+                    onBlur={() => save(config)}
                 />
                 <span style={{ marginLeft: '8px', minWidth: '50px', display: 'inline-block' }}>
-                    {config[field]}
+                    {format ? format(config[field]) : config[field]}
                 </span>
             </td>
         </tr>
@@ -379,6 +427,23 @@ const Config = (props) => {
                         CENSOR_MODES,
                         '',
                         CENSOR_MODE_HELP
+                    )}
+                    {selectRow(
+                        'Default Censor Bar Type',
+                        'defaultCensorType',
+                        CENSOR_TYPE_OPTIONS,
+                        'black',
+                        CENSOR_TYPE_HELP
+                    )}
+                    {sliderRow(
+                        'Default Blur Strength',
+                        'defaultCensorBlurAmount',
+                        MIN_BLUR_AMOUNT,
+                        MAX_BLUR_AMOUNT,
+                        BLUR_AMOUNT_STEP,
+                        CENSOR_BLUR_HELP,
+                        (value) =>
+                            `${Math.round((value ?? 0) * 1000)}/1000 frame width`
                     )}
                 </tbody>
             </table>

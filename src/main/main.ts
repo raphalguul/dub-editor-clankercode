@@ -1548,7 +1548,7 @@ ipcMain.handle(
 
 ipcMain.handle(
     'storeVideo',
-    async (event, { videoSource, subtitles, subtitleObjects, censorBars, censorBarsJson, title, clipNumber, game, audioTrackIndex, keepCensorSource }) => {
+    async (event, { videoSource, subtitles, subtitleObjects, censorBars, censorBarsJson, title, clipNumber, game, audioTrackIndex, keepCensorSource, censorMode }) => {
         log.info(`STORING ${title}-${clipNumber} for game ${game} with subtitles \n${subtitles}`);
         log.info(`SUBTITLE OBJECTS: \n${JSON.stringify(subtitleObjects, null, 5)}`);
 
@@ -1561,9 +1561,12 @@ ipcMain.handle(
 
         // An unset censorMode is treated as the reversible mode so anything that
         // reaches main without going through the editor keeps the old behaviour.
-        // The renderer overrides it for a single clip when the user chooses to
+        // The renderer passes its own censorMode when the user answered the
+        // popup for this clip without remembering a default, which has to win
+        // over config, and it overrides a single clip when the user chooses to
         // keep a master that is already on disk.
-        const saveCensorSource = config.censorMode !== 'bakeOnly' || keepCensorSource === true;
+        const effectiveCensorMode = censorMode ?? config.censorMode;
+        const saveCensorSource = effectiveCensorMode !== 'bakeOnly' || keepCensorSource === true;
 
         if (videoSource.startsWith("localfile://")) {
             log.info('SAVING VIDEO TO ' + videoFilePath + '\n' + subFilePath);

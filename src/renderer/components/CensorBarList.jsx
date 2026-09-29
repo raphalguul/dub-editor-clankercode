@@ -1,8 +1,15 @@
+import React, { useEffect, useState } from 'react';
 import {
+    BLUR_AMOUNT_MAX,
+    BLUR_AMOUNT_MIN,
+    BLUR_AMOUNT_STEP,
     CENSOR_BAR_TYPES,
+    DEFAULT_BLUR_AMOUNT,
+    censorDefaultsFromConfig,
     createCensorBar,
     toSquare,
 } from '../util/VideoTools';
+import ConfigAPI from 'renderer/api/ConfigAPI';
 
 let convertMillisecondsToTimestamp = (milliseconds) => {
     if (milliseconds === undefined || milliseconds === null) {
@@ -71,6 +78,17 @@ export default ({
 }) => {
     let videoLengthMs = videoLength * 1000;
     let defaultBarSize = videoLengthMs * 0.1;
+
+    // New bars start from the settings defaults, so the config is read once
+    // rather than on every add.
+    const [newBarDefaults, setNewBarDefaults] = useState(null);
+
+    useEffect(() => {
+        (async () => {
+            const config = await ConfigAPI.getConfig();
+            setNewBarDefaults(censorDefaultsFromConfig(config));
+        })();
+    }, []);
 
     let currentBarObject = censorBars[currentBar];
 
@@ -209,6 +227,7 @@ export default ({
                             startTime,
                             endTime,
                             rowIndex: currentRow,
+                            ...(newBarDefaults || {}),
                         })
                     );
                 }}
@@ -319,12 +338,12 @@ export default ({
                                 <td>
                                     <input
                                         type="range"
-                                        min="0.005"
-                                        max="0.1"
-                                        step="0.005"
+                                        min={BLUR_AMOUNT_MIN}
+                                        max={BLUR_AMOUNT_MAX}
+                                        step={BLUR_AMOUNT_STEP}
                                         value={
                                             currentBarObject?.blurAmount ??
-                                            0.02
+                                            DEFAULT_BLUR_AMOUNT
                                         }
                                         onChange={({
                                             target: { value },
@@ -340,7 +359,8 @@ export default ({
                                     <span style={{ marginLeft: '6px' }}>
                                         {Math.round(
                                             (currentBarObject
-                                                ?.blurAmount ?? 0.02) * 1000
+                                                ?.blurAmount ??
+                                                DEFAULT_BLUR_AMOUNT) * 1000
                                         )}
                                         /1000 frame width
                                     </span>

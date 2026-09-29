@@ -161,6 +161,16 @@ export const DEFAULT_BLUR_AMOUNT = 0.02;
 export const DEFAULT_CENSOR_BAR_SIZE = 0.2;
 export const MIN_CENSOR_BAR_SIZE = 0.01;
 
+// Blur range as a fraction of frame width. The bounds are what clampCensorBar
+// enforces, so a value picked in either slider is always representable. The step
+// is 0.001 because range inputs anchor to min, which would otherwise land on
+// 0.002, 0.007, 0.012 and so on, and 0.001 is also the unit the UI displays.
+export const MIN_BLUR_AMOUNT = 0.002;
+export const MAX_BLUR_AMOUNT = 0.2;
+export const BLUR_AMOUNT_MIN = MIN_BLUR_AMOUNT;
+export const BLUR_AMOUNT_MAX = MAX_BLUR_AMOUNT;
+export const BLUR_AMOUNT_STEP = 0.001;
+
 let clamp = (value, min, max) => {
     if (!isFinite(value)) {
         return min;
@@ -220,7 +230,7 @@ export let clampCensorBar = (bar) => {
         h,
         blurAmount:
             typeof bar.blurAmount === 'number' && isFinite(bar.blurAmount)
-                ? clamp(bar.blurAmount, 0.002, 0.2)
+                ? clamp(bar.blurAmount, MIN_BLUR_AMOUNT, MAX_BLUR_AMOUNT)
                 : DEFAULT_BLUR_AMOUNT,
     };
 };
@@ -230,6 +240,7 @@ export let createCensorBar = ({
     endTime = 0,
     rowIndex = 0,
     type = 'black',
+    blurAmount = DEFAULT_BLUR_AMOUNT,
 } = {}) => {
     return clampCensorBar({
         index: 0,
@@ -241,9 +252,23 @@ export let createCensorBar = ({
         w: DEFAULT_CENSOR_BAR_SIZE,
         h: DEFAULT_CENSOR_BAR_SIZE,
         type: CENSOR_BAR_TYPES.includes(type) ? type : 'black',
-        blurAmount: DEFAULT_BLUR_AMOUNT,
+        blurAmount,
     });
 };
+
+// New bars are seeded from config, but the config values are only as trustworthy
+// as the file they came from, so both are validated here rather than at the call
+// sites. clampCensorBar handles the blur range a second time.
+export let censorDefaultsFromConfig = (config) => ({
+    type: CENSOR_BAR_TYPES.includes(config?.defaultCensorType)
+        ? config.defaultCensorType
+        : 'black',
+    blurAmount:
+        typeof config?.defaultCensorBlurAmount === 'number' &&
+        isFinite(config.defaultCensorBlurAmount)
+            ? config.defaultCensorBlurAmount
+            : DEFAULT_BLUR_AMOUNT,
+});
 
 let overlaps = (aStart, aEnd, bStart, bEnd) => {
     return aStart <= bEnd && aEnd >= bStart;
@@ -339,7 +364,8 @@ export let addVideo = async (
     isBatch,
     audioTrackIndex,
     censorBars = [],
-    keepCensorSource = false
+    keepCensorSource = false,
+    censorMode = null
 ) => {
     let censorBarsJson = convertCensorBarsToJson(censorBars);
     if (isBatch) {
@@ -366,5 +392,6 @@ export let addVideo = async (
         game: type,
         audioTrackIndex,
         keepCensorSource,
+        censorMode,
     });
 };

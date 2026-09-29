@@ -34,6 +34,11 @@ type Config = {
     // reversible, 'bakeOnly' keeps neither, and null means the user has not
     // picked yet so the editor asks on the first censored finalize.
     censorMode: 'saveSource' | 'bakeOnly' | null;
+    // Seeds newly created bars only. Bars already on disk keep whatever their
+    // sidecar stored, so changing these never rewrites existing clips.
+    defaultCensorType: 'black' | 'blur' | 'delogo';
+    // A fraction of frame width. Bounded by the clamp in clampCensorBar.
+    defaultCensorBlurAmount: number;
 };
 
 const defaultConfig: Config = {
@@ -69,6 +74,8 @@ const defaultConfig: Config = {
     autoIncrementClipNumber: true,
     hardwareVideoDecode: true,
     censorMode: null,
+    defaultCensorType: "black",
+    defaultCensorBlurAmount: 0.02,
 };
 
 export default defaultConfig;

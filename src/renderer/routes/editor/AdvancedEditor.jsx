@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { addVideo, convertSrtToSubtitles, convertJsonToCensorBars, createCensorBar, clampCensorBar, distributeCensorBars } from '../../util/VideoTools';
+import { addVideo, convertSrtToSubtitles, convertJsonToCensorBars, createCensorBar, clampCensorBar, distributeCensorBars, censorDefaultsFromConfig } from '../../util/VideoTools';
 
 import { api } from '../../util/Api';
 
@@ -47,6 +47,7 @@ let AdvancedEditor = () => {
     const [hasCensorSource, setHasCensorSource] = useState(false);
     const [hasCensorData, setHasCensorData] = useState(false);
     const [censorModePrompt, setCensorModePrompt] = useState(null);
+    const [censorBarDefaults, setCensorBarDefaults] = useState(null);
     const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
     const [activeTab, setActiveTab] = useState('subtitles');
 
@@ -126,6 +127,7 @@ let AdvancedEditor = () => {
         defaultClipSize,
         videoLength,
         offset,
+        censorBarDefaults,
     };
     const keyboardHandler = useCallback((event) => {
         if (isActiveElementInput()) {
@@ -283,6 +285,7 @@ let AdvancedEditor = () => {
                                 stateRef.current.videoLength * 1000
                             ),
                             rowIndex: stateRef.current.currentRow,
+                            ...(stateRef.current.censorBarDefaults || {}),
                         }),
                         rowIndex: stateRef.current.currentRow,
                     });
@@ -375,6 +378,13 @@ let AdvancedEditor = () => {
                 VideoAPI.cleanupTempFile(playbackSourceRef.current).catch(() => {});
             }
         };
+    }, []);
+
+    useEffect(() => {
+        (async () => {
+            const config = await ConfigAPI.getConfig();
+            setCensorBarDefaults(censorDefaultsFromConfig(config));
+        })();
     }, []);
 
     const getVideo = async (id) => {
@@ -637,42 +647,53 @@ let AdvancedEditor = () => {
     };
 
     const chooseCensorMode = () =>
-        new Promise((resolve) => setCensorModePrompt({ resolve }));
+        new Promise((resolve) => setCensorModePrompt({ resolve, remember: true }));
 
     const resolveCensorMode = (mode) => {
         if (!censorModePrompt) {
             return;
         }
-        const { resolve } = censorModePrompt;
+        const { resolve, remember } = censorModePrompt;
         setCensorModePrompt(null);
-        resolve(mode);
+        resolve({ mode, remember });
     };
 
     // Runs before the finalize interstitial is raised, otherwise the full screen
     // spinner would sit on top of these questions. Returns null if the user
     // backed out.
     const confirmCensorFinalize = async () => {
-        const noKeep = { keepCensorSource: false };
+        const noKeep = { keepCensorSource: false, censorMode: null };
         if (censorBars.length === 0) {
             return noKeep;
         }
 
         const config = await ConfigAPI.getConfig();
         let censorMode = config.censorMode;
+        // Only set when the user answered the popup for this clip and declined
+        // to make it the default. Remembered choices are left to main to read.
+        let perClipCensorMode = null;
         if (!censorMode) {
-            // First censored finalize on this install. The answer becomes the
-            // new default, so this only happens once.
-            censorMode = await chooseCensorMode();
-            if (!censorMode) {
+            // Nothing is remembered, so the answer does not become the default
+            // and this comes back on the next censored finalize.
+            const choice = await chooseCensorMode();
+            if (!choice || !choice.mode) {
                 return null;
             }
-            await ConfigAPI.storeConfig({ censorMode });
+            censorMode = choice.mode;
+            if (choice.remember) {
+                await ConfigAPI.storeConfig({ censorMode });
+            } else {
+                perClipCensorMode = censorMode;
+            }
         }
 
         const bakeOnly = censorMode === 'bakeOnly';
         let keepCensorSource = false;
         if (bakeOnly && isEdit && hasCensorSource) {
-            keepCensorSource = await window.api.send('showConfirmDialog', {
+            // showConfirmDialog resolves to "a button other than the first was
+            // clicked", so with this button order the result means delete, not
+            // keep. Index 0 is also the cancel button, so Escape keeps it.
+            const deleteCensorSource = await window.api.send('showConfirmDialog', {
                 message:
                     'This clip still has an uncensored copy left over from an earlier finalize.\n\n' +
                     'Censor Bar Storage is set to bake only, so it is normally dropped to save space. ' +
@@ -681,6 +702,7 @@ let AdvancedEditor = () => {
                 buttons: ['Keep Uncensored Copy', 'Delete It'],
                 defaultId: 0,
             });
+            keepCensorSource = !deleteCensorSource;
         }
 
         if (isEdit && !hasCensorSource && (hasCensorData || bakeOnly)) {
@@ -700,14 +722,14 @@ let AdvancedEditor = () => {
             }
         }
 
-        return { keepCensorSource };
+        return { keepCensorSource, censorMode: perClipCensorMode };
     };
 
     let addVideoToGame = async (
         videoName,
         clipNumber,
         collectionId,
-        keepCensorSource
+        censorSettings
     ) => {
         const config = await ConfigAPI.getConfig();
         if (
@@ -769,7 +791,8 @@ let AdvancedEditor = () => {
                 isBatch,
                 selectedAudioTrack,
                 censorBars,
-                keepCensorSource
+                censorSettings.keepCensorSource,
+                censorSettings.censorMode
             );
             if (!collectionId.startsWith('_')) {
                 await CollectionAPI.addToCollection(
@@ -1126,7 +1149,7 @@ currentBarIndex={currentCensor}
                                             title,
                                             number,
                                             collectionId,
-                                            censorSettings.keepCensorSource
+                                            censorSettings
                                         ),
                                         (isOpen) => {
                                             setInterstitialState({
@@ -1188,9 +1211,8 @@ currentBarIndex={currentCensor}
                     >
                         <h4>Censor Bar Storage</h4>
                         <p>
-                            This is your first clip with censor bars, so choose
-                            how Dub Editor should store them. You can change
-                            this at any time in Settings.
+                            Choose how Dub Editor should store these censor
+                            bars. You can change this at any time in Settings.
                         </p>
                         <button
                             className="censor-mode-option"
@@ -1200,11 +1222,7 @@ currentBarIndex={currentCensor}
                                 Keep an uncensored copy (reversible)
                             </strong>
                             <span>
-                                Saves the uncensored video and the bar data
-                                next to the clip, so you can reopen the clip and
-                                move, resize or remove the bars later. Censored
-                                clips take roughly twice as much space in your
-                                workspace.
+                                Censored clips take roughly twice as much space in your workspace.
                             </span>
                         </button>
                         <button
@@ -1215,17 +1233,25 @@ currentBarIndex={currentCensor}
                                 Bake bars into the video only (not reversible)
                             </strong>
                             <span>
-                                Saves only the censored clip. Nothing else is
-                                kept, so the bars cannot be changed or removed
-                                afterwards and you would have to import the
-                                original video again. Uses the least space in
-                                your workspace.
+                                Bars cannot be changed or removed
                             </span>
                         </button>
+                        <label className="censor-mode-remember">
+                            <input
+                                type="checkbox"
+                                checked={censorModePrompt.remember}
+                                onChange={({ target: { checked } }) => {
+                                    setCensorModePrompt((prompt) =>
+                                        prompt
+                                            ? { ...prompt, remember: checked }
+                                            : prompt
+                                    );
+                                }}
+                            />
+                            Remember this choice
+                        </label>
                         <p>
-                            Either way the exported clip pack contains the
-                            censored video only, so this choice does not change
-                            the size of the pack.
+                            Note: This choice does not affect the size of the exported pack.
                         </p>
                         <div className="modal-buttons">
                             <button onClick={() => resolveCensorMode(null)}>

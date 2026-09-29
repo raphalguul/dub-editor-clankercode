@@ -539,6 +539,24 @@ input[type='range']:focus::-webkit-slider-runnable-track {
     line-height: 1.5;
     color: #ccc;
 }
+/* .modal input stretches every control to full width, which would smear the
+   checkbox across the whole dialog. */
+.censor-mode-remember {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.censor-mode-remember input[type='checkbox'] {
+    width: auto;
+    margin: 0;
+    padding: 0;
+}
+.censor-mode-remember-note {
+    margin-top: 6px !important;
+    font-size: 0.75rem !important;
+}
 .modal input {
     width: 100%;
     padding: 8px;
