@@ -27,7 +27,7 @@ import defaultConfig from './defaultConfig';
 import JSZip from 'jszip';
 import { ClipPaths, DirectoryList } from './types';
 import * as whisper from './whisper';
-import { isCompatible, convertToCompatible, probeMediaInfo, AudioTrackInfo } from './videoFormat';
+import { convertToCompatible, probeMediaInfo, AudioTrackInfo, isVideoStreamExportSafe, isExportSafe, remuxToExportAudio } from './videoFormat';
 import { buildCensorFilterGraph, buildCensorOutputMaps, CensorBar } from './censorFilter';
 import { sanitizeClipTitle } from './clipNaming';
 
@@ -359,6 +359,14 @@ const processVideo = async (
     // A real re-encode is happening anyway, so prefer the hardware encoder.
     const videoCodec = filterGraph ? await getEncoder() : 'libx264';
 
+    // A non-positive duration means "to the end of the input". Trimmed clips
+    // always pass a real length; whole-file encodes can hit a source ffprobe
+    // reports no duration for, and a -t 0 there would write an empty clip.
+    const seekOptions = ['-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart'];
+    if (duration > 0) {
+        seekOptions.push('-t', String(duration / 1000));
+    }
+
     return new Promise((resolve, reject) => {
         log.info("PROCESSING " + inputFilePath);
         log.info("STORING TO " + outputFilePath);
@@ -369,7 +377,7 @@ const processVideo = async (
             .audioChannels(2)
             .audioFrequency(44100)
             .seekInput(startTime / 1000)
-            .outputOptions(['-bf', '0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-t', String(duration / 1000)]);
+            .outputOptions(seekOptions);
 
         if (!filterGraph && videoCodec === 'libx264') {
             cmd = cmd.outputOptions(['-crf', '27', '-preset', 'medium']);
@@ -1633,27 +1641,26 @@ ipcMain.handle(
                     log.info('Source is same as destination, skipping video copy');
                 }
             } else if (audioTrackIndex !== undefined) {
-                log.info('Using audio track index: ' + audioTrackIndex + ' (stream copy)');
-                await new Promise((resolve, reject) => {
-                    ffmpeg(sourcePath)
-                        .videoCodec('copy').audioCodec('copy')
-                        .outputOptions(['-map', '0:v:0', '-map', '0:' + audioTrackIndex])
-                        .output(videoFilePath)
-                        .on('end', resolve)
-                        .on('error', (err: Error) => { log.error('Stream copy failed: ' + err); reject(err); })
-                        .run();
-                });
+                const sourceInfo = await probeMediaInfo(sourcePath);
+                if (isVideoStreamExportSafe(sourceInfo)) {
+                    // Only the audio was ever in question here, so the video
+                    // stream is left alone and the picked track is re-encoded.
+                    log.info('Using audio track index: ' + audioTrackIndex + ' (video copy, audio re-encode)');
+                    await remuxToExportAudio(sourcePath, videoFilePath, audioTrackIndex);
+                } else {
+                    // A copied video stream would ship a codec the game rejects,
+                    // so encode the whole thing and keep the chosen track.
+                    log.info('Video stream is not game safe, re-encoding with the chosen audio track');
+                    await processVideo(sourcePath, videoFilePath, 0, sourceInfo.duration * 1000, audioTrackIndex);
+                }
                 try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
             } else {
-                const compatible = await isCompatible(sourcePath);
-                if (!compatible) {
-                    log.info('Source video is not compatible, converting...');
-                    const tmpPath = videoFilePath + '.converting.mp4';
-                    await convertToCompatible(sourcePath, tmpPath);
-                    fs.copyFileSync(tmpPath, videoFilePath);
-                    try { fs.unlinkSync(tmpPath); } catch {}
-                } else {
+                const sourceInfo = await probeMediaInfo(sourcePath);
+                if (isExportSafe(sourceInfo)) {
                     fs.copyFileSync(sourcePath, videoFilePath);
+                } else {
+                    log.info('Source video is not game safe, re-encoding');
+                    await processVideo(sourcePath, videoFilePath, 0, sourceInfo.duration * 1000);
                 }
                 try { fs.unlinkSync(videoFilePath + NORMALIZED_MARKER_SUFFIX); } catch {}
             }

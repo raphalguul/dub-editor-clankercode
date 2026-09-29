@@ -11,6 +11,11 @@ import {
     decodeBase64Utf8,
 } from '../renderer/util/VideoTools';
 import { sanitizeClipTitle } from '../main/clipNaming';
+import {
+    isVideoStreamExportSafe,
+    isExportSafe,
+    MediaInfo,
+} from '../main/videoFormat';
 import { version } from '../../release/app/package.json';
 
 const subtitles = [
@@ -396,5 +401,79 @@ describe('sanitizeClipTitle', () => {
         expect(sanitizeClipTitle('')).toBe('Untitled');
         expect(sanitizeClipTitle(undefined)).toBe('Untitled');
         expect(sanitizeClipTitle('???', 'Clip')).toBe('Clip');
+    });
+});
+
+describe('export compatibility', () => {
+    const media = (overrides: Partial<MediaInfo> = {}): MediaInfo => ({
+        tracks: [{ index: 1, codec: 'aac', language: null, channels: 2, channelLayout: 'stereo', title: null }],
+        videoCodec: 'h264',
+        videoPixFmt: 'yuv420p',
+        videoWidth: 1920,
+        videoHeight: 1080,
+        duration: 120,
+        ...overrides,
+    });
+
+    it('accepts the format every existing clip is already in', () => {
+        expect(isVideoStreamExportSafe(media())).toBe(true);
+        expect(isExportSafe(media())).toBe(true);
+    });
+
+    it('accepts yuvj420p, which is the same layout under a different name', () => {
+        expect(isVideoStreamExportSafe(media({ videoPixFmt: 'yuvj420p' }))).toBe(true);
+    });
+
+    it('rejects a video codec the game will not load', () => {
+        for (const videoCodec of ['hevc', 'vp9', 'vp8', 'av1']) {
+            expect(isVideoStreamExportSafe(media({ videoCodec }))).toBe(false);
+            expect(isExportSafe(media({ videoCodec }))).toBe(false);
+        }
+    });
+
+    it('rejects a pixel format the game will not load', () => {
+        for (const videoPixFmt of ['yuv422p', 'yuv444p', 'yuv444p10le', 'bgra', 'rgb24']) {
+            expect(isVideoStreamExportSafe(media({ videoPixFmt }))).toBe(false);
+        }
+    });
+
+    it('rejects a missing video stream', () => {
+        expect(isVideoStreamExportSafe(media({ videoCodec: null }))).toBe(false);
+        expect(isVideoStreamExportSafe(media({ videoPixFmt: null }))).toBe(false);
+    });
+
+    it('keeps the video-only fast path when the video is fine but audio is not', () => {
+        const opus = media({
+            tracks: [{ index: 1, codec: 'opus', language: null, channels: 2, channelLayout: 'stereo', title: null }],
+        });
+        // The whole file cannot be copied, but the video stream can be.
+        expect(isExportSafe(opus)).toBe(false);
+        expect(isVideoStreamExportSafe(opus)).toBe(true);
+    });
+
+    it('rejects a non-aac audio codec', () => {
+        for (const codec of ['mp3', 'opus', 'flac', 'ac3', 'pcm_s16le']) {
+            expect(
+                isExportSafe(media({
+                    tracks: [{ index: 1, codec, language: null, channels: 2, channelLayout: 'stereo', title: null }],
+                }))
+            ).toBe(false);
+        }
+    });
+
+    it('checks every audio track, since a verbatim copy carries them all', () => {
+        const mixed = media({
+            tracks: [
+                { index: 1, codec: 'aac', language: null, channels: 2, channelLayout: 'stereo', title: null },
+                { index: 2, codec: 'opus', language: 'eng', channels: 2, channelLayout: 'stereo', title: null },
+            ],
+        });
+        expect(isExportSafe(mixed)).toBe(false);
+    });
+
+    it('treats a silent clip as safe, since there is no audio to re-encode', () => {
+        const silent = media({ tracks: [] });
+        expect(isExportSafe(silent)).toBe(true);
+        expect(isVideoStreamExportSafe(silent)).toBe(true);
     });
 });

@@ -6,6 +6,15 @@ const COMPATIBLE_VIDEO_CODECS = ['h264', 'hevc', 'vp8', 'vp9', 'av1'];
 const COMPATIBLE_AUDIO_CODECS = ['aac', 'mp3', 'opus', 'flac', 'ac3', 'eac3', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le'];
 const COMPATIBLE_CONTAINER = 'mp4';
 
+// What the game will actually load. The lists above are for preview playback,
+// which the browser is far more forgiving about than the game is.
+export const EXPORT_VIDEO_CODEC = 'h264';
+export const EXPORT_PIX_FMT = 'yuv420p';
+export const EXPORT_AUDIO_CODEC = 'aac';
+export const EXPORT_AUDIO_CHANNELS = 2;
+export const EXPORT_AUDIO_BITRATE = '192k';
+const EXPORT_ACCEPTED_PIX_FMTS = ['yuv420p', 'yuvj420p'];
+
 interface ProbeResult {
     container: string;
     videoCodec: string | null;
@@ -21,13 +30,69 @@ export interface AudioTrackInfo {
     title: string | null;
 }
 
-interface MediaInfo {
+export interface MediaInfo {
     tracks: AudioTrackInfo[];
     videoCodec: string | null;
     videoPixFmt: string | null;
     videoWidth: number;
     videoHeight: number;
     duration: number;
+}
+
+// Whether the video stream can be handed to the game untouched. Deciding this
+// per stream rather than per file is what lets the audio-only case keep its
+// fast path: the video passes, so only the picked audio track is re-encoded.
+export function isVideoStreamExportSafe(info: MediaInfo): boolean {
+    if (info.videoCodec !== EXPORT_VIDEO_CODEC) {
+        return false;
+    }
+    return EXPORT_ACCEPTED_PIX_FMTS.includes(info.videoPixFmt || '');
+}
+
+// Whether the whole file can be copied straight across. Stricter than the video
+// check alone, because a non-aac audio stream is not something the game takes,
+// and a verbatim copy carries every track in the file, not just the first.
+export function isExportSafe(info: MediaInfo): boolean {
+    if (!isVideoStreamExportSafe(info)) {
+        return false;
+    }
+    return info.tracks.every(
+        (track) => track.codec === null || track.codec === EXPORT_AUDIO_CODEC
+    );
+}
+
+// Video copied as-is, audio re-encoded to what the game needs. Only valid on a
+// source that already passed isVideoStreamExportSafe.
+export function remuxToExportAudio(
+    inputPath: string,
+    outputPath: string,
+    audioTrackIndex?: number
+): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const maps = ['-map', '0:v:0'];
+        if (audioTrackIndex !== undefined) {
+            maps.push('-map', '0:' + audioTrackIndex);
+        }
+
+        log.info('Export remux ' + inputPath + ' (video copy, audio ' + EXPORT_AUDIO_CODEC + ')');
+
+        ffmpeg(inputPath)
+            .videoCodec('copy')
+            .audioCodec(EXPORT_AUDIO_CODEC)
+            .audioBitrate(EXPORT_AUDIO_BITRATE)
+            .audioChannels(EXPORT_AUDIO_CHANNELS)
+            .outputOptions([...maps, '-movflags', '+faststart'])
+            .output(outputPath)
+            .on('end', () => {
+                log.info('Export remux complete: ' + outputPath);
+                resolve();
+            })
+            .on('error', (err: any) => {
+                log.error('Export remux failed: ' + err);
+                reject(err);
+            })
+            .run();
+    });
 }
 
 function probeVideo(filePath: string): Promise<ProbeResult> {
@@ -71,6 +136,11 @@ async function isCompatible(filePath: string): Promise<boolean> {
     }
 }
 
+// The game rejects a good deal of what the browser previews happily, so an
+// export is only ever judged by the strict helpers above. This permissive check
+// still describes playback, and must not be used to decide what gets written to
+// the clip folder.
+
 function convertToCompatible(inputPath: string, outputPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
         log.info('Converting ' + inputPath + ' to compatible format...');
@@ -79,7 +149,7 @@ function convertToCompatible(inputPath: string, outputPath: string): Promise<voi
             .audioCodec('aac')
             .audioBitrate('192k')
             .audioChannels(2)
-            .outputOptions(['-crf', '27', '-preset', 'medium'])
+            .outputOptions(['-crf', '27', '-preset', 'medium', '-pix_fmt', EXPORT_PIX_FMT, '-movflags', '+faststart'])
             .output(outputPath)
             .on('end', () => {
                 log.info('Conversion complete: ' + outputPath);
