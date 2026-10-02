@@ -10,6 +10,7 @@
  */
 import path from 'path';
 import fs from 'fs';
+import dns from 'dns';
 import crypto from 'crypto';
 import os from 'os';
 import { execSync } from 'child_process';
@@ -18,6 +19,8 @@ import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
+
+dns.setDefaultResultOrder('ipv4first');
 
 function fromLocalfileUrl(url: string): string {
     return decodeURIComponent(url.replace(/^localfile:\/{2,}/, '').replace(/^[\/\\]/, ''));

@@ -76,6 +76,8 @@ let AdvancedEditor = () => {
     const playbackSourceRef = useRef('');
     const [substitution] = useState('');
     const [buttonsDisabled, setButtonsDisabled] = useState(false);
+    const [isTranscribing, setIsTranscribing] = useState(false);
+    const transcribingRef = useRef(false);
     const [playerKey, setPlayerKey] = useState(0);
     const [trackKey, setTrackKey] = useState(0);
 
@@ -827,24 +829,30 @@ let AdvancedEditor = () => {
     };
 
     let transcribeAudio = async () => {
-        const cfg = await ConfigAPI.getConfig();
-
-        const whisperConfig = {
-            modelSize: cfg.whisperModelSize || 'base',
-            useCuda: cfg.whisperUseCuda !== false,
-            cudaFallbackCpu: cfg.whisperCudaFallbackCpu !== false,
-            suppressSilence: cfg.whisperSuppressSilence !== false,
-        };
-
-        window.api.onProgress((msg, pct) => {
-            let displayMsg = msg || 'Transcribing with Whisper...';
-            if (pct >= 0) displayMsg += ` (${pct}%)`;
-            setInterstitialState({ isOpen: true, message: displayMsg });
-        });
-
-        setInterstitialState({ isOpen: true, message: 'Transcribing with Whisper...' });
+        // Guard against repeat clicks spawning concurrent transcriptions, which
+        // would race on shared temp files and the single progress listener.
+        if (transcribingRef.current) return;
+        transcribingRef.current = true;
+        setIsTranscribing(true);
 
         try {
+            const cfg = await ConfigAPI.getConfig();
+
+            const whisperConfig = {
+                modelSize: cfg.whisperModelSize || 'base',
+                useCuda: cfg.whisperUseCuda !== false,
+                cudaFallbackCpu: cfg.whisperCudaFallbackCpu !== false,
+                suppressSilence: cfg.whisperSuppressSilence !== false,
+            };
+
+            window.api.onProgress((msg, pct) => {
+                let displayMsg = msg || 'Transcribing with Whisper...';
+                if (pct >= 0) displayMsg += ` (${pct}%)`;
+                setInterstitialState({ isOpen: true, message: displayMsg });
+            });
+
+            setInterstitialState({ isOpen: true, message: 'Transcribing with Whisper...' });
+
             let payload = {
                 videoPath: videoSource,
                 config: whisperConfig,
@@ -884,6 +892,9 @@ let AdvancedEditor = () => {
             setInterstitialState({ isOpen: false, message: '' });
             console.error(err);
             toast(`Transcription failed: ${err}`, { type: 'error' });
+        } finally {
+            transcribingRef.current = false;
+            setIsTranscribing(false);
         }
     };
 
@@ -1098,9 +1109,12 @@ return (
                         <div style={{ margin: '10px 0' }}>
                             <button
                                 onClick={transcribeAudio}
+                                disabled={isTranscribing}
                                 style={{ fontWeight: 'bold' }}
                             >
-                                Generate Subtitles (Whisper)
+                                {isTranscribing
+                                    ? 'Transcribing...'
+                                    : 'Generate Subtitles (Whisper)'}
                             </button>
                             <button
                                 onClick={() => setPlayerKey(k => k + 1)}

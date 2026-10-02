@@ -94,83 +94,230 @@ function getModelsDir(): string {
   return p;
 }
 
+const RETRYABLE_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ERR_STREAM_DESTROYED',
+]);
+
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+function isRetryableError(err: any): boolean {
+  if (!err) return false;
+  if (err.code && RETRYABLE_ERROR_CODES.has(err.code)) return true;
+  const msg = String(err.message || '');
+  return msg.includes('socket hang up') || msg.includes('ECONNRESET');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function backoffDelay(attempt: number): number {
+  const base = Math.min(30000, 200 * 2 ** attempt);
+  return base + Math.floor(Math.random() * 250);
+}
+
+function existingFileSize(dest: string): number {
+  try {
+    return fs.statSync(dest).size;
+  } catch {
+    return 0;
+  }
+}
+
+// Downloads with HTTP Range resume and bounded retry/backoff. A partial file
+// left on disk is resumed on the next attempt; servers that ignore Range (200
+// to a ranged request) cause a clean restart instead of a corrupt append.
 function downloadFile(
   url: string,
   dest: string,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  attempt = 0,
+  maxAttempts = 10
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
+    const startBytes = existingFileSize(dest);
     const proto = url.startsWith('https') ? https : http;
 
-    const request = proto.get(url, { timeout: 300000, headers: { 'User-Agent': USER_AGENT } }, (response) => {
-      if (response.statusCode === 301 || response.statusCode === 302) {
-        file.close();
-        fs.unlinkSync(dest);
-        downloadFile(response.headers.location!, dest, onProgress)
+    const headers: any = { 'User-Agent': USER_AGENT };
+    if (startBytes > 0) headers.Range = `bytes=${startBytes}-`;
+
+    let file: fs.WriteStream | undefined;
+    let settled = false;
+    let redirected = false;
+
+    const fail = (err: Error, retryable: boolean) => {
+      if (settled || redirected) return;
+      settled = true;
+      if (file) {
+        try {
+          file.close();
+        } catch {}
+      }
+      if (retryable && attempt + 1 < maxAttempts) {
+        // Keep the partial file so the retry can resume via Range.
+        sleep(backoffDelay(attempt))
+          .then(() => downloadFile(url, dest, onProgress, attempt + 1, maxAttempts))
           .then(resolve)
           .catch(reject);
         return;
       }
-
-      if (response.statusCode !== 200) {
-        file.close();
-        fs.unlinkSync(dest);
-        reject(new Error(`HTTP ${response.statusCode} for ${url}`));
-        return;
+      if (!retryable) {
+        try {
+          fs.unlinkSync(dest);
+        } catch {}
       }
+      reject(err);
+    };
 
-      const total = parseInt(response.headers['content-length'] || '0', 10);
-      let downloaded = 0;
-      let lastReported = 0;
+    const request = proto.get(
+      url,
+      { timeout: 300000, headers },
+      (response) => {
+        const status = response.statusCode || 0;
 
-      response.on('data', (chunk: Buffer) => {
-        downloaded += chunk.length;
-        file.write(chunk);
-        if (total > 0 && onProgress) {
-          const pct = Math.floor((downloaded * 100) / total);
-          if (pct >= lastReported + 10) {
-            lastReported = pct;
-            onProgress(pct);
+        if ([301, 302, 307, 308].includes(status)) {
+          try {
+            response.resume();
+          } catch {}
+          const loc = response.headers.location;
+          if (!loc) {
+            fail(new Error(`Redirect with no location for ${url}`), true);
+            return;
           }
+          let nextUrl = loc;
+          try {
+            nextUrl = new URL(loc, url).toString();
+          } catch {}
+          redirected = true;
+          downloadFile(nextUrl, dest, onProgress, attempt, maxAttempts)
+            .then(resolve)
+            .catch(reject);
+          return;
         }
-      });
 
-      response.on('end', () => {
-        file.end();
-        if (onProgress) onProgress(100);
-        resolve();
-      });
+        if (status === 416) {
+          try {
+            response.resume();
+          } catch {}
+          if (onProgress) onProgress(100);
+          settled = true;
+          resolve();
+          return;
+        }
 
-      response.on('error', (err) => {
-        file.close();
-        fs.unlinkSync(dest);
-        reject(err);
-      });
-    });
+        if (status !== 200 && status !== 206) {
+          try {
+            response.resume();
+          } catch {}
+          fail(
+            new Error(`HTTP ${status} for ${url}`),
+            RETRYABLE_HTTP_STATUS.has(status)
+          );
+          return;
+        }
+
+        if (startBytes > 0 && status === 200) {
+          // Server ignored our Range header; restart from scratch.
+          try {
+            fs.unlinkSync(dest);
+          } catch {}
+          redirected = true;
+          downloadFile(url, dest, onProgress, attempt, maxAttempts)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
+        const contentRange = response.headers['content-range'];
+        const rangeMatch = contentRange ? /(\d+)\s*$/.exec(contentRange) : null;
+        const contentLength = parseInt(
+          response.headers['content-length'] || '0',
+          10
+        );
+        const total = rangeMatch
+          ? parseInt(rangeMatch[1], 10)
+          : startBytes + contentLength;
+
+        let downloaded = startBytes;
+        let lastReported = total > 0 ? Math.floor((downloaded * 100) / total) : 0;
+
+        file = fs.createWriteStream(dest, {
+          flags: startBytes > 0 ? 'a' : 'w',
+        });
+
+        response.on('data', (chunk: Buffer) => {
+          downloaded += chunk.length;
+          if (file) file.write(chunk);
+          if (total > 0 && onProgress) {
+            const pct = Math.floor((downloaded * 100) / total);
+            if (pct >= lastReported + 5) {
+              lastReported = pct;
+              onProgress(Math.min(pct, 99));
+            }
+          }
+        });
+
+        response.on('end', () => {
+          if (settled) return;
+          settled = true;
+          if (file) file.end();
+          if (onProgress) onProgress(100);
+          resolve();
+        });
+
+        response.on('error', (err) => {
+          fail(err, true);
+        });
+      }
+    );
 
     request.on('timeout', () => {
+      fail(new Error('Download timed out'), true);
       request.destroy();
-      file.close();
-      fs.unlinkSync(dest);
-      reject(new Error('Download timed out'));
     });
 
     request.on('error', (err) => {
-      file.close();
-      fs.unlinkSync(dest);
-      reject(err);
+      fail(err, isRetryableError(err));
     });
   });
 }
 
-function fetchJson(url: string): Promise<any> {
+async function fetchJson(
+  url: string,
+  attempt = 0,
+  maxAttempts = 4
+): Promise<any> {
+  try {
+    return await fetchJsonOnce(url);
+  } catch (e: any) {
+    const retryableStatus =
+      typeof e?.statusCode === 'number' &&
+      RETRYABLE_HTTP_STATUS.has(e.statusCode);
+    if (attempt + 1 < maxAttempts && (isRetryableError(e) || retryableStatus)) {
+      await sleep(backoffDelay(attempt));
+      return fetchJson(url, attempt + 1, maxAttempts);
+    }
+    throw e;
+  }
+}
+
+function fetchJsonOnce(url: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
     proto
       .get(url, { timeout: 15000, headers: { 'User-Agent': USER_AGENT } }, (response) => {
         if (response.statusCode !== 200) {
-          reject(new Error(`HTTP ${response.statusCode} for ${url}`));
+          const err: any = new Error(`HTTP ${response.statusCode} for ${url}`);
+          err.statusCode = response.statusCode;
+          reject(err);
           return;
         }
         let data = '';
