@@ -6,6 +6,8 @@ import { execFile } from 'child_process';
 import https from 'https';
 import http from 'http';
 
+import { resolveWhisperBinary, selectAssetUrl, WhisperRelease } from './whisperAssets';
+
 const ffmpeg = require('fluent-ffmpeg');
 const StreamZip = require('node-stream-zip');
 
@@ -21,6 +23,19 @@ export interface SubtitleResult {
   startTime: number;
   endTime: number;
   text: string;
+}
+
+export interface WhisperPreflightItem {
+    label: string;
+    status: 'ok' | 'cached' | 'error';
+    detail: string;
+}
+
+export interface WhisperPreflightResult {
+    ok: boolean;
+    cacheDir: string;
+    modelDir: string;
+    items: WhisperPreflightItem[];
 }
 
 const MODEL_MAP: Record<string, string> = {
@@ -41,6 +56,19 @@ const MODEL_SIZES: Record<string, string> = {
 };
 
 const HF_MODEL_BASE = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main';
+const GITHUB_RELEASES_URL = 'https://api.github.com/repos/ggml-org/whisper.cpp/releases';
+
+// api.github.com answers 403 to requests without a User-Agent.
+const USER_AGENT = 'dub-editor-electron';
+
+// whisper.cpp stopped attaching binaries to v* tags (v1.9.3 and v1.9.4 have
+// none) and moved them onto rolling b#### prereleases, so
+// /releases/latest/download/... 404s every time now. These pinned tags are the
+// newest verified to still carry the Windows x64 zips.
+const CPU_BINARY_FALLBACK_URL =
+  'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip';
+const CUDA_BINARY_FALLBACK_URL =
+  'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-cublas-12.4.0-bin-x64.zip';
 
 function getUserDataBase(): string {
   const p = path.join(app.getPath('userData'), 'whisper');
@@ -75,7 +103,7 @@ function downloadFile(
     const file = fs.createWriteStream(dest);
     const proto = url.startsWith('https') ? https : http;
 
-    const request = proto.get(url, { timeout: 300000 }, (response) => {
+    const request = proto.get(url, { timeout: 300000, headers: { 'User-Agent': USER_AGENT } }, (response) => {
       if (response.statusCode === 301 || response.statusCode === 302) {
         file.close();
         fs.unlinkSync(dest);
@@ -88,7 +116,7 @@ function downloadFile(
       if (response.statusCode !== 200) {
         file.close();
         fs.unlinkSync(dest);
-        reject(new Error(`HTTP ${response.statusCode}`));
+        reject(new Error(`HTTP ${response.statusCode} for ${url}`));
         return;
       }
 
@@ -140,9 +168,9 @@ function fetchJson(url: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
     proto
-      .get(url, { timeout: 15000 }, (response) => {
+      .get(url, { timeout: 15000, headers: { 'User-Agent': USER_AGENT } }, (response) => {
         if (response.statusCode !== 200) {
-          reject(new Error(`HTTP ${response.statusCode}`));
+          reject(new Error(`HTTP ${response.statusCode} for ${url}`));
           return;
         }
         let data = '';
@@ -159,24 +187,23 @@ function fetchJson(url: string): Promise<any> {
   });
 }
 
-async function resolveLatestAssetUrl(prefix: string): Promise<string | null> {
+async function resolveLatestAssetUrl(
+  prefix: string,
+  onLog?: (msg: string) => void
+): Promise<string | null> {
   try {
-    const release = await fetchJson(
-      'https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest'
+    const releases: WhisperRelease[] = await fetchJson(
+      `${GITHUB_RELEASES_URL}?per_page=20`
     );
-    const assets: { name: string; browser_download_url: string }[] =
-      release.assets || [];
+    if (!Array.isArray(releases)) return null;
 
-    if (prefix === 'whisper-cublas-') {
-      const cuda12 = assets.find(
-        (a) => a.name.startsWith(prefix) && a.name.includes('12.')
-      );
-      if (cuda12) return cuda12.browser_download_url;
+    const url = selectAssetUrl(releases, prefix);
+    if (!url) {
+      onLog?.(`No ${prefix} asset found in recent whisper.cpp releases`);
     }
-
-    const found = assets.find((a) => a.name.startsWith(prefix));
-    return found ? found.browser_download_url : null;
-  } catch {
+    return url;
+  } catch (e: any) {
+    onLog?.(`Could not list whisper.cpp releases: ${e?.message || e}`);
     return null;
   }
 }
@@ -214,10 +241,9 @@ async function findOrDownloadCpuBinary(
 
   onLog?.('Downloading whisper.cpp CPU binary...');
 
-  let url = await resolveLatestAssetUrl('whisper-bin-');
+  let url = await resolveLatestAssetUrl('whisper-bin-', onLog);
   if (!url) {
-    url =
-      'https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip';
+    url = CPU_BINARY_FALLBACK_URL;
   }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whisper-cpu-dl-'));
@@ -236,6 +262,9 @@ async function findOrDownloadCpuBinary(
     }
 
     return fs.existsSync(exePath) ? exePath : null;
+  } catch (e: any) {
+    onLog?.(`CPU binary download failed: ${e?.message || e}`);
+    return null;
   } finally {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -258,10 +287,9 @@ async function findOrDownloadCudaBinary(
 
   onLog?.('Downloading whisper.cpp CUDA binary...');
 
-  let url = await resolveLatestAssetUrl('whisper-cublas-');
+  let url = await resolveLatestAssetUrl('whisper-cublas-', onLog);
   if (!url) {
-    url =
-      'https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-cublas-12.4.0-bin-x64.zip';
+    url = CUDA_BINARY_FALLBACK_URL;
   }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whisper-cuda-dl-'));
@@ -280,6 +308,9 @@ async function findOrDownloadCudaBinary(
     }
 
     return fs.existsSync(exePath) ? exePath : null;
+  } catch (e: any) {
+    onLog?.(`CUDA binary download failed: ${e?.message || e}`);
+    return null;
   } finally {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -396,20 +427,19 @@ async function transcribe(
     let whisperExe: string | null = null;
     let useCuda = config.useCuda;
 
-    if (useCuda) {
-      whisperExe = await findOrDownloadCudaBinary(onLog);
-      if (!whisperExe && config.cudaFallbackCpu) {
-        onLog?.('CUDA binary not available, falling back to CPU');
-        useCuda = false;
-      }
-    }
-
-    if (!useCuda && !whisperExe) {
-      whisperExe = await findOrDownloadCpuBinary(onLog);
-    }
+    ({ whisperExe, useCuda } = await resolveWhisperBinary(
+      config.useCuda,
+      config.cudaFallbackCpu,
+      () => findOrDownloadCudaBinary(onLog),
+      () => findOrDownloadCpuBinary(onLog),
+      onLog
+    ));
 
     if (!whisperExe) {
-      throw new Error('whisper.cpp binary not found');
+      throw new Error(
+        'whisper.cpp binary could not be downloaded. Check your internet ' +
+        'connection, then use Config > Check & Download Whisper Components.'
+      );
     }
 
     onLog?.(`Using whisper binary: ${whisperExe}`);
@@ -545,15 +575,82 @@ function findWhisperBinary(): string | null {
   return null;
 }
 
+async function preflight(
+  config: WhisperConfig,
+  onLog?: (msg: string) => void
+): Promise<WhisperPreflightResult> {
+  const items: WhisperPreflightItem[] = [];
+
+  const check = async (
+    label: string,
+    cachedPath: string,
+    acquire: () => Promise<string | null>
+  ): Promise<void> => {
+    if (fs.existsSync(cachedPath)) {
+      items.push({ label, status: 'cached', detail: path.basename(cachedPath) });
+      return;
+    }
+
+    onLog?.(`Fetching ${label}...`);
+    try {
+      const resolved = await acquire();
+      items.push(
+        resolved
+          ? { label, status: 'ok', detail: path.basename(resolved) }
+          : {
+            label,
+            status: 'error',
+            detail: 'Download finished but produced no usable file',
+          }
+      );
+    } catch (e: any) {
+      items.push({ label, status: 'error', detail: e?.message || String(e) });
+    }
+  };
+
+  await check(
+    'whisper.cpp CPU binary',
+    path.join(getCpuBinaryDir(), 'whisper.cpp.exe'),
+    () => findOrDownloadCpuBinary(onLog)
+  );
+
+  if (config.useCuda) {
+    await check(
+      'whisper.cpp CUDA binary',
+      path.join(getCudaBinaryDir(), 'whisper.cpp.cuda.exe'),
+      () => findOrDownloadCudaBinary(onLog)
+    );
+  }
+
+  const modelFile = MODEL_MAP[config.modelSize] || `ggml-${config.modelSize}.bin`;
+  await check(
+    `Model ${modelFile}`,
+    path.join(getModelsDir(), modelFile),
+    () => findOrDownloadModel(config.modelSize, onLog)
+  );
+
+  return {
+    ok: items.every((i) => i.status !== 'error'),
+    cacheDir: getUserDataBase(),
+    modelDir: getModelsDir(),
+    items,
+  };
+}
+
 export {
   transcribe,
+  preflight,
   extractAudioToWav,
   downloadFile,
+  findOrDownloadCpuBinary,
+  findOrDownloadCudaBinary,
   findOrDownloadModel,
   findModelFile,
   findWhisperBinary,
+  getUserDataBase,
   getCpuBinaryDir,
   getCudaBinaryDir,
   getModelsDir,
+  resolveLatestAssetUrl,
   MODEL_MAP,
 };

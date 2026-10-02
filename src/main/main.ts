@@ -1989,6 +1989,15 @@ ipcMain.handle('transcribeAudio', async (event, { videoPath, config: whisperConf
     return { results };
 });
 
+ipcMain.handle('preflightWhisper', async (event, whisperConfig) => {
+    log.info(`PREFLIGHT WHISPER: ${JSON.stringify(whisperConfig)}`);
+
+    return await whisper.preflight(
+        whisperConfig,
+        (msg: string) => { log.info('[whisper] ' + msg); mainWindow?.webContents.send('whisper:progress', msg, -1); }
+    );
+});
+
 ipcMain.handle('check-for-update', async () => {
     await checkForUpdatesAndPrompt(false);
 });

@@ -1,10 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import HelpButton from 'renderer/components/HelpButton';
+import WhisperAPI from 'renderer/api/WhisperAPI';
 import {
     BLUR_AMOUNT_STEP,
     MAX_BLUR_AMOUNT,
     MIN_BLUR_AMOUNT,
 } from 'renderer/util/VideoTools';
+
+const WHISPER_STATUS_LABELS = {
+    ok: { text: 'Ready', color: '#4caf50' },
+    cached: { text: 'Cached', color: '#888' },
+    error: { text: 'Failed', color: '#f44336' },
+};
 
 const WORKSPACE_HELP_TEXT = (
     <>
@@ -110,6 +117,22 @@ const WHISPER_MODEL_HELP = (
     </>
 );
 
+const WHISPER_FILES_HELP = (
+    <>
+        <h4>Check &amp; Download Whisper Components</h4>
+        <p style={{ fontSize: '0.8rem' }}>
+            Verifies that the whisper.cpp binaries and your selected model are
+            present, and downloads anything missing. Run this if transcription
+            fails, so you can see exactly which download failed.
+        </p>
+        <p style={{ fontSize: '0.8rem' }}>
+            If you have no internet connection, you can place the files
+            yourself. See the Whisper Troubleshooting section of the README for
+            the URLs and folder locations.
+        </p>
+    </>
+);
+
 const CENSOR_MODE_HELP = (
     <>
         <h4>Censor Bar Storage</h4>
@@ -130,16 +153,16 @@ const CENSOR_MODE_HELP = (
             so this setting does not change the size of the pack.
         </p>
         <p style={{ fontSize: '0.8rem' }}>
-            <strong>Ask me each time (no default)</strong> shows this popup on
+            <strong>Ask me each time</strong> shows this popup on
             every censored finalize until you choose to remember a setting.
         </p>
     </>
 );
 
 const CENSOR_MODES = [
-    ['', 'Ask me each time (no default)'],
+    ['', 'Ask each time'],
     ['saveSource', 'Keep an uncensored copy (reversible)'],
-    ['bakeOnly', 'Bake bars into the video only (not reversible)'],
+    ['bakeOnly', 'No uncensored copy (not reversible)'],
 ];
 
 const CENSOR_TYPE_HELP = (
@@ -184,6 +207,9 @@ const Config = (props) => {
     const [config, setConfig] = useState({});
     const [error, setError] = useState(null);
     const [showDrcSettings, setShowDrcSettings] = useState(false);
+    const [whisperStatus, setWhisperStatus] = useState(null);
+    const [whisperBusy, setWhisperBusy] = useState(false);
+    const [whisperLog, setWhisperLog] = useState('');
 
     useEffect(() => {
         getConfig();
@@ -213,6 +239,41 @@ const Config = (props) => {
         if (filePath) {
             let newConfig = updateConfig(field, filePath);
             save(newConfig);
+        }
+    };
+
+    const runWhisperPreflight = async () => {
+        setWhisperBusy(true);
+        setWhisperStatus(null);
+        setWhisperLog('');
+
+        window.api.onProgress((msg) => {
+            if (msg) setWhisperLog(msg);
+        });
+
+        const whisperConfig = {
+            modelSize: config.whisperModelSize || 'base',
+            useCuda: config.whisperUseCuda !== false,
+            cudaFallbackCpu: config.whisperCudaFallbackCpu !== false,
+            suppressSilence: config.whisperSuppressSilence !== false,
+        };
+
+        try {
+            setWhisperStatus(await WhisperAPI.preflight(whisperConfig));
+        } catch (err) {
+            setWhisperStatus({
+                ok: false,
+                items: [
+                    {
+                        label: 'Preflight',
+                        status: 'error',
+                        detail: `${err}`,
+                    },
+                ],
+            });
+        } finally {
+            window.api.removeProgressListener();
+            setWhisperBusy(false);
         }
     };
 
@@ -411,8 +472,81 @@ const Config = (props) => {
                         'whisperSuppressSilence',
                         WHISPER_MODEL_HELP
                     )}
+                    <tr>
+                        <td style={{ fontWeight: 'bold', textAlign: 'left' }}>
+                            Whisper Files <HelpButton helpText={WHISPER_FILES_HELP} />
+                        </td>
+                        <td style={{ textAlign: 'left', paddingLeft: '10px' }}>
+                            <button
+                                onClick={runWhisperPreflight}
+                                disabled={whisperBusy}
+                                style={{ fontWeight: 'bold' }}
+                            >
+                                {whisperBusy
+                                    ? 'Downloading...'
+                                    : 'Check & Download Whisper Components'}
+                            </button>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
+            {whisperBusy && whisperLog && (
+                <p style={{ fontSize: '0.7rem', color: '#888', marginTop: '8px' }}>
+                    {whisperLog}
+                </p>
+            )}
+            {whisperStatus && (
+                <div style={{ marginTop: '10px' }}>
+                    <table style={{ margin: 'auto' }}>
+                        <tbody>
+                            {whisperStatus.items.map((item) => (
+                                <tr key={item.label}>
+                                    <td
+                                        style={{
+                                            textAlign: 'left',
+                                            paddingRight: '10px',
+                                            fontWeight: 'bold',
+                                            color:
+                                                WHISPER_STATUS_LABELS[
+                                                    item.status
+                                                ].color,
+                                        }}
+                                    >
+                                        {
+                                            WHISPER_STATUS_LABELS[
+                                                item.status
+                                            ].text
+                                        }
+                                    </td>
+                                    <td style={{ textAlign: 'left' }}>
+                                        {item.label}
+                                    </td>
+                                    <td
+                                        style={{
+                                            textAlign: 'left',
+                                            paddingLeft: '10px',
+                                            color: '#888',
+                                        }}
+                                    >
+                                        {item.detail}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {whisperStatus.modelDir && (
+                        <p
+                            style={{
+                                fontSize: '0.7rem',
+                                color: '#888',
+                                marginTop: '8px',
+                            }}
+                        >
+                            Files are stored in {whisperStatus.modelDir}
+                        </p>
+                    )}
+                </div>
+            )}
         </div>
     );
 

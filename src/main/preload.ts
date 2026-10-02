@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('api', {
             'normalizeAudio',
             'normalizeCollection',
             'transcribeAudio',
+            'preflightWhisper',
             'log',
             'check-for-update'
         ];
