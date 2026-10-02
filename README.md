@@ -39,7 +39,7 @@ From here it depends if you have already trimmed a video file to the exact lengt
 
 ### Video Editor
 
-- Once the clip is open, click Generate Subtitles (Whisper) - you may need to download additional dependencies for autogeneration to work
+- Once the clip is open, click [Generate Subtitles (Whisper)](https://github.com/raphalguul/dub-editor-clankercode/blob/clankercode_main/Whisper%20Troubleshooting.md) - you may need to download additional dependencies for autogeneration to work
 - Once the subtitles are generated, you can click them in the timeline and review/correct them
 - Adjust timings
 - Add more subtitles or remove the generated ones manually
