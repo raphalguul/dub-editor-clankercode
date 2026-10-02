@@ -139,4 +139,4 @@ Select your folder (subfolders will also be processed) and if files should be ov
 
 ## Bug Reports
 
-If you encounter any issues, flag them on the issues page here on GitHub. I might be able to look into it.
+If you encounter any issues, flag them on the [issues page here on GitHub](https://github.com/raphalguul/dub-editor-clankercode/issues). I might be able to look into it.
