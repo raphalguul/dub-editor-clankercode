@@ -125,11 +125,6 @@ const WHISPER_FILES_HELP = (
             present, and downloads anything missing. Run this if transcription
             fails, so you can see exactly which download failed.
         </p>
-        <p style={{ fontSize: '0.8rem' }}>
-            If you have no internet connection, you can place the files
-            yourself. See the Whisper Troubleshooting section of the README for
-            the URLs and folder locations.
-        </p>
     </>
 );
 
