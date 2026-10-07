@@ -34,6 +34,7 @@ let ClipCutter = () => {
     const [playbackSource, setPlaybackSource] = useState('');
     const playbackSourceRef = useRef('');
     const [substitution] = useState('');
+    const [rightPaneWidth, setRightPaneWidth] = useState(50);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentPosition, setCurrentPosition] = useState(0);
@@ -44,7 +45,6 @@ let ClipCutter = () => {
     const [clipName, setClipName] = useState('');
     const [forceReencode, setForceReencode] = useState(false);
 
-    let videoLengthMs = videoLength * 1000;
     let defaultClipSize = 8000; // 8 seconds
 
     window.onresize = () => {
@@ -414,8 +414,38 @@ let ClipCutter = () => {
                                 setVideoLength(video.duration);
                             }}
                         />
+                        <div
+                            onMouseDown={(e) => {
+                                e.preventDefault();
+                                const startX = e.clientX;
+                                const startPct = rightPaneWidth;
+                                const paneWidthPx =
+                                    e.currentTarget.parentElement.getBoundingClientRect()
+                                        .width;
+                                const onMove = (ev) => {
+                                    const deltaPct =
+                                        ((ev.clientX - startX) / paneWidthPx) * 100;
+                                    setRightPaneWidth(
+                                        Math.min(75, Math.max(25, startPct - deltaPct))
+                                    );
+                                };
+                                const onUp = () => {
+                                    document.removeEventListener('mousemove', onMove);
+                                    document.removeEventListener('mouseup', onUp);
+                                };
+                                document.addEventListener('mousemove', onMove);
+                                document.addEventListener('mouseup', onUp);
+                            }}
+                            style={{
+                                width: '6px',
+                                flexShrink: 0,
+                                cursor: 'col-resize',
+                                background: '#888',
+                            }}
+                        />
                         <ClipList
                             key={videoSource}
+                            paneWidth={rightPaneWidth}
                             game={params.type}
                             clips={clips}
                             currentClip={currentClip}

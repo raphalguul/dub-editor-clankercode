@@ -108,7 +108,7 @@ export default ({
             setViewStartMs(0);
             return;
         }
-        let margin = visibleWindowMs * 0.15;
+        let margin = visibleWindowMs * 0.05;
         if (currentSliderPosition < viewStartMs + margin) {
             setViewStartMs(
                 Math.max(0, currentSliderPosition - margin)
@@ -143,7 +143,7 @@ export default ({
         let timeAtMouse = viewStartMs + (mouseX / timelineWidth) * visibleWindowMs;
 
         let factor = e.deltaY < 0 ? 1.3 : 1 / 1.3;
-        let newZoom = Math.max(1, Math.min(100, zoom * factor));
+        let newZoom = Math.max(1, Math.min(200, zoom * factor));
 
         let newVisibleWindow = videoLengthMs / newZoom;
         let newViewStart = timeAtMouse - (mouseX / timelineWidth) * newVisibleWindow;
@@ -158,7 +158,7 @@ export default ({
 
     let zoomIn = () => {
         let centerTime = viewStartMs + visibleWindowMs / 2;
-        let newZoom = Math.min(100, zoom * 2);
+        let newZoom = Math.min(200, zoom * 2);
         if (newZoom === zoom) return;
         let newVisibleWindow = videoLengthMs / newZoom;
         let newViewStart = centerTime - newVisibleWindow / 2;
@@ -204,6 +204,15 @@ export default ({
     if (videoLengthMs > 0) {
         const visibleStart = Math.max(0, viewStartMs);
         const visibleEnd = Math.min(videoLengthMs, viewEndMs);
+        if (visibleWindowMs <= 60000) {
+            const firstSecond = Math.ceil(visibleStart / 1000) * 1000;
+            for (let t = firstSecond; t <= visibleEnd; t += 1000) {
+                if (t % 10000 === 0) {
+                    continue;
+                }
+                markers.push({ timeMs: t, isSecond: true });
+            }
+        }
         const firstMark = Math.ceil(visibleStart / 10000) * 10000;
         for (let t = firstMark; t <= visibleEnd; t += 10000) {
             markers.push({ timeMs: t, isMinute: t % 60000 === 0 });
@@ -615,8 +624,12 @@ export default ({
                                 top: 0,
                                 width: '1px',
                                 height: '100%',
-                                backgroundColor: m.isMinute ? '#ff6b6b' : '#555',
-                                opacity: m.isMinute ? 0.9 : 0.6,
+                                backgroundColor: m.isMinute
+                                    ? '#ff6b6b'
+                                    : m.isSecond
+                                    ? '#ffd43b'
+                                    : '#555',
+                                opacity: m.isMinute ? 0.9 : m.isSecond ? 0.7 : 0.6,
                             }}
                         />
                     ))}

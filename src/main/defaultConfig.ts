@@ -5,13 +5,8 @@ type Config = {
     isMac: boolean;
     lastGame: string;
     rememberGame: boolean;
-    lastCollection: {
-        rifftrax: string | null;
-        whatthedub: string | null;
-    };
     rememberCollection: boolean;
-    rememberAddCollection: boolean;
-    lastAddCollection: {
+    lastCollection: {
         rifftrax: string | null;
         whatthedub: string | null;
     };
@@ -48,13 +43,8 @@ const defaultConfig: Config = {
     isMac: false,
     lastGame: "rifftrax",
     rememberGame: true,
-    lastCollection: {
-        rifftrax: null,
-        whatthedub: null,
-    },
     rememberCollection: true,
-    rememberAddCollection: false,
-    lastAddCollection: {
+    lastCollection: {
         rifftrax: null,
         whatthedub: null,
     },

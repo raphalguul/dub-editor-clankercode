@@ -78,8 +78,9 @@ let AdvancedEditor = () => {
     const [buttonsDisabled, setButtonsDisabled] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const transcribingRef = useRef(false);
-    const [playerKey, setPlayerKey] = useState(0);
+    const [playerKey] = useState(0);
     const [trackKey, setTrackKey] = useState(0);
+    const [rightPaneWidth, setRightPaneWidth] = useState(50);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentPosition, setCurrentPosition] = useState(0);
@@ -1058,72 +1059,105 @@ return (
             {videoSource ? (
                 <div className="editor-container">
                     <div className="top-pane">
-                        <WhatTheDubPlayer
-                            key={playerKey}
-                            trackKey={trackKey}
-                            width="100%"
-                            videoSource={playbackSource}
-                            isPlaying={
-                                isPlaying &&
-                                (!batchClip ||
-                                    (currentSliderPosition >=
-                                        batchClip.clip.startTime &&
-                                        currentSliderPosition <=
+                        <div
+                            style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                flex: '1 1 auto',
+                                minWidth: 0,
+                            }}
+                        >
+                            <WhatTheDubPlayer
+                                key={playerKey}
+                                trackKey={trackKey}
+                                width="100%"
+                                videoSource={playbackSource}
+                                isPlaying={
+                                    isPlaying &&
+                                    (!batchClip ||
+                                        (currentSliderPosition >=
+                                            batchClip.clip.startTime &&
+                                            currentSliderPosition <=
                                             batchClip.clip.endTime))
-                            }
-                            videoPosition={currentPosition}
-                            subs={subs}
-                            censorBars={censorBars}
-                            censorBarPosition={currentSliderPosition - offset}
-                            currentBarIndex={currentCensor}
-                            isCensorTab={isCensorTab}
-                            onCensorBarChange={censorBarChangeHandler}
-                            onSelectCensorBar={handleCensorSelect}
-                            offset={offset}
-                            substitution={substitution}
-                            censorBarVisibility={new Map(censorBars.map((b) => [b.index, b.showPreview !== false]))}
-                            videoLengthMs={videoLength * 1000}
-                            onEnd={() => {
-                                setIsPlaying(false);
-                                setCurrentSliderPosition(stateRef.current.offset + stateRef.current.videoLength * 1000 + 15);
+                                }
+                                videoPosition={currentPosition}
+                                subs={subs}
+                                censorBars={censorBars}
+                                censorBarPosition={currentSliderPosition - offset}
+                                currentBarIndex={currentCensor}
+                                isCensorTab={isCensorTab}
+                                onCensorBarChange={censorBarChangeHandler}
+                                onSelectCensorBar={handleCensorSelect}
+                                offset={offset}
+                                substitution={substitution}
+                                censorBarVisibility={new Map(censorBars.map((b) => [b.index, b.showPreview !== false]))}
+                                videoLengthMs={videoLength * 1000}
+                                onEnd={() => {
+                                    setIsPlaying(false);
+                                    setCurrentSliderPosition(stateRef.current.offset + stateRef.current.videoLength * 1000 + 15);
+                                }}
+                                onIndexChange={(index) => {
+                                       setCurrentSub(index);
+                                   }}
+                                onVideoPositionChange={(position) => {
+                                    setCurrentSliderPosition(Math.max(offset, position * 1000));
+                                }}
+                                onVideoLoaded={async (video) => {
+                                    if (!isBatch) {
+                                        setEndTime(video.duration * 1000);
+                                    }
+                                    if (!videoLength) {
+                                        setVideoLength(video.duration);
+                                    }
+                                    const config = await ConfigAPI.getConfig();
+                                    if (config.fixSubsOnLoad !== false && !isBatch) {
+                                        fixSubs(video.duration * 1000);
+                                    }
+                                }}
+                            />
+                            <div style={{ margin: '10px 0', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                                <button
+                                    onClick={transcribeAudio}
+                                    disabled={isTranscribing}
+                                    style={{ fontWeight: 'bold' }}
+                                >
+                                    {isTranscribing
+                                        ? 'Transcribing...'
+                                        : 'Generate Subtitles'}
+                                </button>
+                            </div>
+                        </div>
+                        <div
+                            onMouseDown={(e) => {
+                                e.preventDefault();
+                                const startX = e.clientX;
+                                const startPct = rightPaneWidth;
+                                const paneWidthPx =
+                                    e.currentTarget.parentElement.getBoundingClientRect()
+                                        .width;
+                                const onMove = (ev) => {
+                                    const deltaPct =
+                                        ((ev.clientX - startX) / paneWidthPx) * 100;
+                                    setRightPaneWidth(
+                                        Math.min(75, Math.max(25, startPct - deltaPct))
+                                    );
+                                };
+                                const onUp = () => {
+                                    document.removeEventListener('mousemove', onMove);
+                                    document.removeEventListener('mouseup', onUp);
+                                };
+                                document.addEventListener('mousemove', onMove);
+                                document.addEventListener('mouseup', onUp);
                             }}
-                            onIndexChange={(index) => {
-                                   setCurrentSub(index);
-                               }}
-                            onVideoPositionChange={(position) => {
-                                setCurrentSliderPosition(Math.max(offset, position * 1000));
-                            }}
-                            onVideoLoaded={async (video) => {
-                                if (!isBatch) {
-                                    setEndTime(video.duration * 1000);
-                                }
-                                if (!videoLength) {
-                                    setVideoLength(video.duration);
-                                }
-                                const config = await ConfigAPI.getConfig();
-                                if (config.fixSubsOnLoad !== false && !isBatch) {
-                                    fixSubs(video.duration * 1000);
-                                }
+                            style={{
+                                width: '6px',
+                                flexShrink: 0,
+                                cursor: 'col-resize',
+                                background: '#888',
                             }}
                         />
-                        <div style={{ margin: '10px 0' }}>
-                            <button
-                                onClick={transcribeAudio}
-                                disabled={isTranscribing}
-                                style={{ fontWeight: 'bold' }}
-                            >
-                                {isTranscribing
-                                    ? 'Transcribing...'
-                                    : 'Generate Subtitles (Whisper)'}
-                            </button>
-                            <button
-                                onClick={() => setPlayerKey(k => k + 1)}
-                                style={{ marginLeft: 10 }}
-                            >
-                                Refresh Player
-                            </button>
-                        </div>
                         <SubtitleList
+                            paneWidth={rightPaneWidth}
                             game={params.type}
                             currentSliderPosition={
                                 currentSliderPosition - offset

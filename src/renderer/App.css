@@ -307,6 +307,10 @@ button.selected {
     width: 100%;
 }
 
+.subtitle-window input[type='checkbox'] {
+    width: auto;
+}
+
 .video-list-element {
     border: 1px solid transparent;
     border-radius: 10px;

@@ -1,7 +1,7 @@
 import CollectionAPI from 'renderer/api/CollectionAPI';
 import ConfigAPI from 'renderer/api/ConfigAPI';
 import CensorBarList from './CensorBarList';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 let convertMillisecondsToTimestamp = (milliseconds) => {
@@ -45,15 +45,17 @@ export default ({
     onSave,
     isEdit,
     buttonsDisabled = false,
+    paneWidth,
 }) => {
     const [clipTitle, setClipTitle] = useState(titleOverride || '');
     const [clipNumber, setClipNumber] = useState(clipNumberOverride || 1);
     const [collections, setCollections] = useState([]);
     const [selectedCollection, setSelectedCollection] = useState('_none');
-    const [rememberAddCollection, setRememberAddCollection] = useState(false);
     const [showNewPackModal, setShowNewPackModal] = useState(false);
     const [newPackName, setNewPackName] = useState('');
     const [previousCollection, setPreviousCollection] = useState('_none');
+    const [rememberCollection, setRememberCollection] = useState(false);
+    const configRef = useRef(null);
 
     let videoLengthMs = videoLength * 1000;
     let defaultClipSize = videoLengthMs * 0.1;
@@ -65,24 +67,21 @@ export default ({
     useEffect(() => {
         (async () => {
             const config = await ConfigAPI.getConfig();
-            setRememberAddCollection(!!config.rememberAddCollection);
-            if (config.rememberAddCollection && config.lastAddCollection?.[game]) {
-                setSelectedCollection(config.lastAddCollection[game]);
+            configRef.current = config;
+            setRememberCollection(!!config.rememberCollection);
+            if (isEdit || !config.rememberCollection) {
+                return;
+            }
+            const remembered = config.lastCollection?.[game];
+            if (!remembered || remembered === 'unsorted') {
+                return;
+            }
+            const packs = await CollectionAPI.getCollections(game);
+            if (packs[remembered]) {
+                setSelectedCollection(remembered);
             }
         })();
     }, []);
-
-    useEffect(() => {
-        if (rememberAddCollection && selectedCollection !== '_none') {
-            ConfigAPI.storeConfig({
-                lastAddCollection: {
-                    rifftrax: null,
-                    whatthedub: null,
-                    [game]: selectedCollection,
-                },
-            });
-        }
-    }, [selectedCollection]);
 
     useEffect(() => {
         if (titleOverride && clipNumberOverride) {
@@ -101,6 +100,36 @@ export default ({
         setCollections(collections);
     };
 
+    const persistCollection = (value) => {
+        const config = configRef.current || {};
+        if (!rememberCollection) {
+            return;
+        }
+        const lastCollection = {
+            ...config.lastCollection,
+            [game]: value === '_none' ? null : value,
+        };
+        configRef.current = { ...config, lastCollection };
+        ConfigAPI.storeConfig({ lastCollection });
+    };
+
+    const handleRememberChange = ({ target: { checked } }) => {
+        setRememberCollection(checked);
+        const config = configRef.current || {};
+        if (checked) {
+            const lastCollection = {
+                ...config.lastCollection,
+                [game]: selectedCollection === '_none' ? null : selectedCollection,
+            };
+            configRef.current = { ...config, rememberCollection: true, lastCollection };
+            ConfigAPI.storeConfig({ rememberCollection: true, lastCollection });
+        } else {
+            const lastCollection = { rifftrax: null, whatthedub: null };
+            configRef.current = { ...config, rememberCollection: false, lastCollection };
+            ConfigAPI.storeConfig({ rememberCollection: false, lastCollection });
+        }
+    };
+
     const handleCollectionChange = ({ target: { value } }) => {
         if (value === '__new_pack__') {
             setPreviousCollection(selectedCollection);
@@ -109,6 +138,7 @@ export default ({
             return;
         }
         setSelectedCollection(value);
+        persistCollection(value);
     };
 
     const createNewPack = async () => {
@@ -119,6 +149,7 @@ export default ({
         const updated = await CollectionAPI.getCollections(game);
         setCollections(updated);
         setSelectedCollection(name);
+        persistCollection(name);
         setShowNewPackModal(false);
     };
 
@@ -136,7 +167,10 @@ export default ({
     let speakerPlaceholder = prevSpeaker || 'YOU FORGOT TO DEFINE SPEAKERS';
 
     return (
-        <div className="subtitle-window">
+        <div
+            className="subtitle-window"
+            style={paneWidth != null ? { width: `${paneWidth}%` } : undefined}
+        >
             <h3>Clip Details</h3>
             <div className="video-editor">
                 <table style={{ margin: 'auto' }}>
@@ -169,40 +203,48 @@ export default ({
                     </tr>
                     <tr>
                         <td>Collection</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
-                            <select
-                                value={selectedCollection}
-                                onChange={handleCollectionChange}
-                                disabled={isEdit}
+                        <td>
+                            <span
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                }}
                             >
-                                <option value="_none">None</option>
-                                <option value="__new_pack__">New Pack…</option>
-                                {Object.keys(collections).sort().map(
-                                    (collectionId) => (
-                                        <option key={collectionId} value={collectionId}>{collectionId}</option>
-                                    )
+                                <select
+                                    value={selectedCollection}
+                                    onChange={handleCollectionChange}
+                                    disabled={isEdit}
+                                    style={{ flexShrink: 0 }}
+                                >
+                                    <option value="_none">None</option>
+                                    <option value="__new_pack__">New Pack…</option>
+                                    {Object.keys(collections).sort().map(
+                                        (collectionId) => (
+                                            <option key={collectionId} value={collectionId}>{collectionId}</option>
+                                        )
+                                    )}
+                                </select>
+                                {!isEdit && (
+                                    <label
+                                        style={{
+                                            fontSize: '0.8em',
+                                            flexShrink: 0,
+                                            whiteSpace: 'nowrap',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '3px',
+                                        }}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={rememberCollection}
+                                            onChange={handleRememberChange}
+                                        />
+                                        Remember
+                                    </label>
                                 )}
-                            </select>
-                            <label style={{ fontSize: '0.8em', marginLeft: 4 }}>
-                                <input
-                                    type="checkbox"
-                                    checked={rememberAddCollection}
-                                    onChange={({ target: { checked } }) => {
-                                        setRememberAddCollection(checked);
-                                        ConfigAPI.storeConfig({ rememberAddCollection: checked });
-                                        if (checked && selectedCollection !== '_none') {
-                                            ConfigAPI.storeConfig({
-                                                lastAddCollection: {
-                                                    rifftrax: null,
-                                                    whatthedub: null,
-                                                    [game]: selectedCollection,
-                                                },
-                                            });
-                                        }
-                                    }}
-                                />
-                                Remember
-                            </label>
+                            </span>
                         </td>
                     </tr>
                     </tbody>

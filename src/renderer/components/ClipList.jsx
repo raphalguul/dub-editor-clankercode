@@ -29,6 +29,7 @@ export default ({
     onProcess,
     onPlayClip,
     initialTitle,
+    paneWidth,
 }) => {
     const [clipTitle, setClipTitle] = useState(initialTitle || '');
     const [blinkingClipIndex, setBlinkingClipIndex] = useState(null);
@@ -58,7 +59,10 @@ export default ({
     };
 
     return (
-        <div className="subtitle-window">
+        <div
+            className="subtitle-window"
+            style={paneWidth != null ? { width: `${paneWidth}%` } : undefined}
+        >
             <h3>Clip Details</h3>
             <div className="video-editor">
                 <table style={{ margin: 'auto' }}>

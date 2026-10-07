@@ -12,15 +12,12 @@ let VideoList = () => {
     const [batchCount, setBatchCount] = useState(0);
     const [collectionMap, setCollectionMap] = useState({});
     const [config, setConfig] = useState({});
+    const [filter, setFilter] = useState('');
     const [game] = useAtom(gameAtom);
     const navigate = useNavigate();
 
     const videos = videoMap[game];
     const collections = collectionMap[game];
-
-    const defaultFilter = config.rememberCollection
-        ? config.lastCollection?.[game] || ''
-        : '';
 
     const saveConfig = async (partial) => {
         await window.api.send('updateConfig', partial);
@@ -54,6 +51,11 @@ let VideoList = () => {
         setCollectionMap(collectionMapTemp);
         setBatchCount(hasBatch);
         setConfig(config);
+        setFilter(
+            config.rememberCollection
+                ? config.lastCollection?.[game] || ''
+                : ''
+        );
     };
 
     useEffect(() => {
@@ -106,8 +108,9 @@ let VideoList = () => {
                 includeDelete
                 includeRename
                 allowCollectionFilter
-                defaultFilter={defaultFilter}
+                defaultFilter={filter}
                 onFilterChange={(value) => {
+                    setFilter(value);
                     if (config.rememberCollection) {
                         saveConfig({
                             lastCollection: {
@@ -119,7 +122,23 @@ let VideoList = () => {
                 }}
                 rememberCollection={config.rememberCollection}
                 onRememberChange={(checked) => {
-                    saveConfig({ rememberCollection: checked });
+                    if (checked) {
+                        saveConfig({
+                            rememberCollection: true,
+                            lastCollection: {
+                                ...config.lastCollection,
+                                [game]: filter || null,
+                            },
+                        });
+                    } else {
+                        saveConfig({
+                            rememberCollection: false,
+                            lastCollection: {
+                                rifftrax: null,
+                                whatthedub: null,
+                            },
+                        });
+                    }
                 }}
             />
         </div>
