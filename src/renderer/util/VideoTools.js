@@ -26,13 +26,20 @@ export let convertSecondsToTimestamp = (seconds) => {
 };
 
 export let convertSecondsToAltTimestamp = (seconds) => {
-    let m = Math.floor(seconds / 60);
+    // WebVTT timestamps must keep minutes in the 0-59 range, so anything at or
+    // past an hour has to carry an hours field. Without it, cues beyond 60
+    // minutes (e.g. batch clips taken late in a long source) are invalid and
+    // the browser silently drops them, leaving playback with no subtitles.
+    let h = Math.floor(seconds / 3600);
+    let m = Math.floor((seconds % 3600) / 60);
     let s = Math.floor(seconds % 60);
     let ms = Math.floor((seconds - Math.trunc(seconds)) * 1000);
 
-    return `${m.toString().padStart(2, '0')}:${s
+    let mmss = `${m.toString().padStart(2, '0')}:${s
         .toString()
         .padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+
+    return h > 0 ? `${h.toString().padStart(2, '0')}:${mmss}` : mmss;
 };
 
 export let convertSubtitlesToSrt = (subtitles, game) => {

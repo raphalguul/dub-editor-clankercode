@@ -1,6 +1,8 @@
 import {
     convertSubtitlesToSrt,
     convertSrtToSubtitles,
+    convertSecondsToAltTimestamp,
+    convertSubtitlesToWebVtt,
     convertCensorBarsToJson,
     convertJsonToCensorBars,
     clampCensorBar,
@@ -52,6 +54,45 @@ describe('convertSrtToSubtitles metadata handling', () => {
         expect(parsed).toHaveLength(1);
         expect(parsed[0].text).toBe("And then there's people who stand in doorways");
         expect(parsed[0].speaker).toBe('Ricky');
+    });
+});
+
+describe('convertSecondsToAltTimestamp (WebVTT)', () => {
+    // WebVTT requires the minutes field to stay in 0-59, so timestamps at or
+    // past an hour must carry an hours component. Without it a cue such as
+    // 62:30.000 is invalid and the browser drops it, so subtitles vanish for
+    // clips taken beyond the one hour mark of a source video.
+    it('keeps mm:ss.mmm under an hour', () => {
+        expect(convertSecondsToAltTimestamp(0)).toBe('00:00.000');
+        expect(convertSecondsToAltTimestamp(59.999)).toBe('00:59.999');
+        expect(convertSecondsToAltTimestamp(61.5)).toBe('01:01.500');
+        expect(convertSecondsToAltTimestamp(3599.5)).toBe('59:59.500');
+    });
+
+    it('adds an hours field at and beyond one hour', () => {
+        expect(convertSecondsToAltTimestamp(3600)).toBe('01:00:00.000');
+        expect(convertSecondsToAltTimestamp(3661.5)).toBe('01:01:01.500');
+        expect(convertSecondsToAltTimestamp(3720)).toBe('01:02:00.000');
+    });
+});
+
+describe('convertSubtitlesToWebVtt', () => {
+    it('emits spec-valid timestamps for cues past one hour', () => {
+        const vtt = convertSubtitlesToWebVtt(
+            [{ startTime: 3720000, endTime: 3730000, text: 'late cue' }],
+            '',
+            0
+        );
+
+        expect(vtt).toContain('01:02:00.000 --> 01:02:10.000');
+        // No timestamp field may have minutes of 60 or more.
+        const times = vtt.match(/\d{2,}:\d{2}:\d{2}\.\d{3}/g) || [];
+        expect(times.length).toBeGreaterThan(0);
+        for (const t of times) {
+            const [, m, s] = t.split(':');
+            expect(Number(m)).toBeLessThan(60);
+            expect(Number(s)).toBeLessThan(60);
+        }
     });
 });
 
