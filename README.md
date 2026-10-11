@@ -8,6 +8,7 @@ Main additions/changes:
 - Automatic audio normalization
 - Improved clip cutter
 - Speaker support
+- Censorship options
 - Automatic clip naming
 - Bug fixes
 - UI improvements
